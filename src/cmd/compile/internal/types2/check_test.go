@@ -301,11 +301,7 @@ func TestTypecheckConst(t *testing.T) {
 	code := `
 package p
 
-const (
-Mon = iota
-Tue
-Tur
-)
+const name = "strinG" + " " + " g"
 `
 
 	f, err := parseSrc("testTypecheckConst", code)
@@ -325,5 +321,25 @@ Tur
 		fmt.Printf("Typecheck Error: %v\n", err)
 	}
 
-	conf.Check("<no package>", []*syntax.File{f}, nil)
+	info := Info{
+		Types:      make(map[syntax.Expr]TypeAndValue),
+		Defs:       make(map[*syntax.Name]Object),
+		Uses:       make(map[*syntax.Name]Object),
+		Selections: make(map[*syntax.SelectorExpr]*Selection),
+		Implicits:  make(map[syntax.Node]Object),
+		Scopes:     make(map[syntax.Node]*Scope),
+		Inferred:   make(map[syntax.Expr]Inferred),
+		// expand as needed
+	}
+
+	conf.Check("<no package>", []*syntax.File{f}, &info)
+
+	println("Types:")
+	for expr, tv := range info.Types {
+		fmt.Printf("Expr: %v, TV: %v\n", expr, tv)
+	}
+	println("Inferred:")
+	for expr, tv := range info.Inferred {
+		fmt.Printf("Expr: %v, TV: %v\n", expr, tv)
+	}
 }
