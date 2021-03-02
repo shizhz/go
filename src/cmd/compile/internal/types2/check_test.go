@@ -296,3 +296,34 @@ func testDir(t *testing.T, colDelta uint, dir string) {
 		checkFiles(t, []string{path}, "", colDelta, false)
 	}
 }
+
+func TestTypecheckConst(t *testing.T) {
+	code := `
+package p
+
+const (
+Mon = iota
+Tue
+Tur
+)
+`
+
+	f, err := parseSrc("testTypecheckConst", code)
+
+	if err != nil {
+		panic(err)
+	}
+
+	syntax.Fdump(os.Stdout, f)
+
+	var conf Config
+	conf.AcceptMethodTypeParams = true
+	conf.InferFromConstraints = true
+	conf.Trace = true
+	conf.Importer = defaultImporter()
+	conf.Error = func(err error) {
+		fmt.Printf("Typecheck Error: %v\n", err)
+	}
+
+	conf.Check("<no package>", []*syntax.File{f}, nil)
+}
