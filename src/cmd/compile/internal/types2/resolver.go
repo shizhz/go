@@ -327,6 +327,7 @@ func (check *Checker) collectObjects() {
 				iota := constant.MakeInt64(int64(index - first))
 
 				// determine which initialization expressions to use
+				// shizhz - for iota group
 				inherited := true
 				switch {
 				case s.Type != nil || s.Values != nil:
@@ -515,6 +516,7 @@ L: // unpack receiver type
 	}
 
 	// unpack type parameters, if any
+	// shizhz - 如果 Reciever 有类型参数（泛型），则将其解析出来
 	if ptyp, _ := rtyp.(*syntax.IndexExpr); ptyp != nil {
 		rtyp = ptyp.X
 		if unpackParams {

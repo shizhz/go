@@ -73,7 +73,7 @@ func (check *Checker) funcInst(x *operand, inst *ast.IndexExpr) {
 			x.expr = inst
 			return
 		}
-		// all type arguments were inferred sucessfully
+		// all type arguments were inferred successfully
 		if debug {
 			for _, targ := range targs {
 				assert(targ != nil)
@@ -128,7 +128,7 @@ func (check *Checker) call(x *operand, call *ast.CallExpr) exprKind {
 				}
 				if t := asInterface(T); t != nil {
 					check.completeInterface(token.NoPos, t)
-					if t.IsConstraint() {
+					if t._IsConstraint() {
 						check.errorf(call, _Todo, "cannot use interface %s in conversion (contains type list or is comparable)", T)
 						break
 					}
@@ -404,7 +404,7 @@ func (check *Checker) arguments(call *ast.CallExpr, sig *Signature, args []*oper
 				return
 			}
 		}
-		// all type arguments were inferred sucessfully
+		// all type arguments were inferred successfully
 		if debug {
 			for _, targ := range targs {
 				assert(targ != nil)

@@ -8,6 +8,7 @@ import (
 	"cmd/compile/internal/syntax"
 	"fmt"
 	"internal/testenv"
+	"os"
 	"sort"
 	"testing"
 
@@ -219,4 +220,71 @@ func TestResolveIdents(t *testing.T) {
 	}
 
 	// TODO(gri) add tests to check ImplicitObj callbacks
+}
+
+func TestCheckFiles(t *testing.T) {
+	code := `
+package p
+
+import (
+"net/http"
+"strings"
+)
+
+const name = "Golang"
+
+// type String string
+
+// func (this String) Name( )string {
+//     return string(this)
+// }
+
+// func (this String) Age( )int {
+//     return 10
+// }
+
+// type Str = String
+
+// func (this Str) Addr( )string {
+//     return "CD " + string(this)
+// }
+
+`
+	f, err := parseSrc("source[-importDecls-]", code)
+
+	syntax.Fdump(os.Stdout, f)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	importer := new(resolveTestImporter)
+	conf := Config{
+		Importer: importer,
+		Error: func(err error) {
+			fmt.Printf("Error: %v\n", err)
+		},
+		Trace:                    true,
+		DisableUnusedImportCheck: true,
+	}
+	uses := make(map[*syntax.Name]Object)
+	defs := make(map[*syntax.Name]Object)
+	info := &Info{Defs: defs, Uses: uses}
+	check := NewChecker(&conf, NewPackage("testCollectObjectOfImportDecls", ""), info)
+
+	err = check.Files([]*syntax.File{f})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	println("Defs:")
+	for name, def := range check.Defs {
+		fmt.Printf("\tName: %s, Def: %v\n", name.Value, def)
+	}
+
+	println("Implicits:")
+	for nod, imp := range check.Implicits {
+		fmt.Printf("Node: %v, Imp: %v", nod, imp)
+	}
+
 }
