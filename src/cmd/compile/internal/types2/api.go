@@ -216,7 +216,7 @@ type Info struct {
 	// For an embedded field, Defs returns the field *Var it defines.
 	//
 	// Invariant: Defs[id] == nil || Defs[id].Pos() == id.Pos()
-	Defs map[*syntax.Name]Object
+	Defs map[*syntax.Name]Object // shizhz - checker.collectObjects()
 
 	// Uses maps identifiers to the objects they denote.
 	//
@@ -234,7 +234,7 @@ type Info struct {
 	//     *syntax.CaseClause    type-specific *Var for each type switch case clause (incl. default)
 	//     *syntax.Field         anonymous parameter *Var (incl. unnamed results)
 	//
-	Implicits map[syntax.Node]Object
+	Implicits map[syntax.Node]Object // shizhz - checker.collectObjects()
 
 	// Selections maps selector expressions (excluding qualified identifiers)
 	// to their corresponding selections.

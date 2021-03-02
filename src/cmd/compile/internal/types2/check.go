@@ -274,6 +274,7 @@ func (check *Checker) checkFiles(files []*syntax.File) (err error) {
 	check.initFiles(files)
 
 	print("== collectObjects ==")
+	// shizhz - 将 AST 中的声明转换成 Object 与 declInfo, 然后存放在 checker 中。检查命名冲突，并将类型方法组织在一起
 	check.collectObjects()
 
 	print("== packageObjects ==")
