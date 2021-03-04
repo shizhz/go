@@ -37,7 +37,6 @@ import (
 	"sync"
 
 	"cmd/go/internal/base"
-	"cmd/go/internal/cfg"
 	"cmd/go/internal/imports"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modload"
@@ -53,7 +52,7 @@ import (
 var CmdGet = &base.Command{
 	// Note: -d -u are listed explicitly because they are the most common get flags.
 	// Do not send CLs removing them because they're covered by [get flags].
-	UsageLine: "go get [-d] [-t] [-u] [-v] [-insecure] [build flags] [packages]",
+	UsageLine: "go get [-d] [-t] [-u] [-v] [build flags] [packages]",
 	Short:     "add dependencies to current module and install them",
 	Long: `
 Get resolves its command-line arguments to packages at specific module versions,
@@ -98,14 +97,6 @@ but changes the default to select patch releases.
 
 When the -t and -u flags are used together, get will update
 test dependencies as well.
-
-The -insecure flag permits fetching from repositories and resolving
-custom domains using insecure schemes such as HTTP, and also bypassess
-module sum validation using the checksum database. Use with caution.
-This flag is deprecated and will be removed in a future version of go.
-To permit the use of insecure schemes, use the GOINSECURE environment
-variable instead. To bypass module sum validation, use GOPRIVATE or
-GONOSUMDB. See 'go help environment' for details.
 
 The -d flag instructs get not to build or install packages. get will only
 update go.mod and download source code needed to build packages.
@@ -227,13 +218,13 @@ variable for future go command invocations.
 }
 
 var (
-	getD   = CmdGet.Flag.Bool("d", false, "")
-	getF   = CmdGet.Flag.Bool("f", false, "")
-	getFix = CmdGet.Flag.Bool("fix", false, "")
-	getM   = CmdGet.Flag.Bool("m", false, "")
-	getT   = CmdGet.Flag.Bool("t", false, "")
-	getU   upgradeFlag
-	// -insecure is cfg.Insecure
+	getD        = CmdGet.Flag.Bool("d", false, "")
+	getF        = CmdGet.Flag.Bool("f", false, "")
+	getFix      = CmdGet.Flag.Bool("fix", false, "")
+	getM        = CmdGet.Flag.Bool("m", false, "")
+	getT        = CmdGet.Flag.Bool("t", false, "")
+	getU        upgradeFlag
+	getInsecure = CmdGet.Flag.Bool("insecure", false, "")
 	// -v is cfg.BuildV
 )
 
@@ -264,7 +255,6 @@ func (v *upgradeFlag) String() string { return "" }
 func init() {
 	work.AddBuildFlags(CmdGet, work.OmitModFlag)
 	CmdGet.Run = runGet // break init loop
-	CmdGet.Flag.BoolVar(&cfg.Insecure, "insecure", cfg.Insecure, "")
 	CmdGet.Flag.Var(&getU, "u", "")
 }
 
@@ -284,8 +274,8 @@ func runGet(ctx context.Context, cmd *base.Command, args []string) {
 	if *getM {
 		base.Fatalf("go get: -m flag is no longer supported; consider -d to skip building packages")
 	}
-	if cfg.Insecure {
-		fmt.Fprintf(os.Stderr, "go get: -insecure flag is deprecated; see 'go help get' for details\n")
+	if *getInsecure {
+		base.Fatalf("go get: -insecure flag is no longer supported; use GOINSECURE instead")
 	}
 	load.ModResolveTests = *getT
 
@@ -1120,9 +1110,10 @@ func (r *resolver) findAndUpgradeImports(ctx context.Context, queries []*query) 
 // build list.
 func (r *resolver) loadPackages(ctx context.Context, patterns []string, findPackage func(ctx context.Context, path string, m module.Version) (versionOk bool)) {
 	opts := modload.PackageOpts{
-		Tags:          imports.AnyTags(),
-		LoadTests:     *getT,
-		SilenceErrors: true, // May be fixed by subsequent upgrades or downgrades.
+		Tags:                     imports.AnyTags(),
+		VendorModulesInGOROOTSrc: true,
+		LoadTests:                *getT,
+		SilenceErrors:            true, // May be fixed by subsequent upgrades or downgrades.
 	}
 
 	opts.AllowPackage = func(ctx context.Context, path string, m module.Version) error {
@@ -1459,9 +1450,10 @@ func (r *resolver) checkPackagesAndRetractions(ctx context.Context, pkgPatterns 
 		// LoadPackages will print errors (since it has more context) but will not
 		// exit, since we need to load retractions later.
 		pkgOpts := modload.PackageOpts{
-			LoadTests:             *getT,
-			ResolveMissingImports: false,
-			AllowErrors:           true,
+			VendorModulesInGOROOTSrc: true,
+			LoadTests:                *getT,
+			ResolveMissingImports:    false,
+			AllowErrors:              true,
 		}
 		matches, pkgs := modload.LoadPackages(ctx, pkgOpts, pkgPatterns...)
 		for _, m := range matches {

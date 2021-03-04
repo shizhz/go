@@ -52,12 +52,12 @@ func (a *ABIParamResultInfo) OutRegistersUsed() int {
 	return a.outRegistersUsed
 }
 
-func (a *ABIParamResultInfo) InParam(i int) ABIParamAssignment {
-	return a.inparams[i]
+func (a *ABIParamResultInfo) InParam(i int) *ABIParamAssignment {
+	return &a.inparams[i]
 }
 
-func (a *ABIParamResultInfo) OutParam(i int) ABIParamAssignment {
-	return a.outparams[i]
+func (a *ABIParamResultInfo) OutParam(i int) *ABIParamAssignment {
+	return &a.outparams[i]
 }
 
 func (a *ABIParamResultInfo) SpillAreaOffset() int64 {
@@ -111,6 +111,18 @@ func (a *ABIParamAssignment) SpillOffset() int32 {
 	return a.offset
 }
 
+// FrameOffset returns the location that a value would spill to, if any exists.
+// For register-allocated inputs, that is their spill offset reserved for morestack
+// (might as well use it, it is there); for stack-allocated inputs and outputs,
+// that is their location on the stack.  For register-allocated outputs, there is
+// no defined spill area, so return -1.
+func (a *ABIParamAssignment) FrameOffset(i *ABIParamResultInfo) int64 {
+	if len(a.Registers) == 0 || a.offset == -1 {
+		return int64(a.offset)
+	}
+	return int64(a.offset) + i.SpillAreaOffset()
+}
+
 // RegAmounts holds a specified number of integer/float registers.
 type RegAmounts struct {
 	intRegs   int
@@ -121,14 +133,15 @@ type RegAmounts struct {
 // by the ABI rules for parameter passing and result returning.
 type ABIConfig struct {
 	// Do we need anything more than this?
+	offsetForLocals  int64 // e.g., obj.(*Link).FixedFrameSize() -- extra linkage information on some architectures.
 	regAmounts       RegAmounts
 	regsForTypeCache map[*types.Type]int
 }
 
 // NewABIConfig returns a new ABI configuration for an architecture with
 // iRegsCount integer/pointer registers and fRegsCount floating point registers.
-func NewABIConfig(iRegsCount, fRegsCount int) *ABIConfig {
-	return &ABIConfig{regAmounts: RegAmounts{iRegsCount, fRegsCount}, regsForTypeCache: make(map[*types.Type]int)}
+func NewABIConfig(iRegsCount, fRegsCount int, offsetForLocals int64) *ABIConfig {
+	return &ABIConfig{offsetForLocals: offsetForLocals, regAmounts: RegAmounts{iRegsCount, fRegsCount}, regsForTypeCache: make(map[*types.Type]int)}
 }
 
 // Copy returns a copy of an ABIConfig for use in a function's compilation so that access to the cache does not need to be protected with a mutex.
@@ -136,6 +149,20 @@ func (a *ABIConfig) Copy() *ABIConfig {
 	b := *a
 	b.regsForTypeCache = make(map[*types.Type]int)
 	return &b
+}
+
+// LocalsOffset returns the architecture-dependent offset from SP for args and results.
+// In theory this is only used for debugging; it ought to already be incorporated into
+// results from the ABI-related methods
+func (a *ABIConfig) LocalsOffset() int64 {
+	return a.offsetForLocals
+}
+
+// FloatIndexFor translates r into an index in the floating point parameter
+// registers.  If the result is negative, the input index was actually for the
+// integer parameter registers.
+func (a *ABIConfig) FloatIndexFor(r RegIndex) int64 {
+	return int64(r) - int64(a.regAmounts.intRegs)
 }
 
 // NumParamRegs returns the number of parameter registers used for a given type,
@@ -190,7 +217,8 @@ func (a *ABIParamResultInfo) preAllocateParams(hasRcvr bool, nIns, nOuts int) {
 func (config *ABIConfig) ABIAnalyzeTypes(rcvr *types.Type, ins, outs []*types.Type) *ABIParamResultInfo {
 	setup()
 	s := assignState{
-		rTotal: config.regAmounts,
+		stackOffset: config.offsetForLocals,
+		rTotal:      config.regAmounts,
 	}
 	result := &ABIParamResultInfo{config: config}
 	result.preAllocateParams(rcvr != nil, len(ins), len(outs))
@@ -223,22 +251,22 @@ func (config *ABIConfig) ABIAnalyzeTypes(rcvr *types.Type, ins, outs []*types.Ty
 	return result
 }
 
-// ABIAnalyze takes a function type 't' and an ABI rules description
+// ABIAnalyzeFuncType takes a function type 'ft' and an ABI rules description
 // 'config' and analyzes the function to determine how its parameters
 // and results will be passed (in registers or on the stack), returning
 // an ABIParamResultInfo object that holds the results of the analysis.
-func (config *ABIConfig) ABIAnalyze(t *types.Type) *ABIParamResultInfo {
+func (config *ABIConfig) ABIAnalyzeFuncType(ft *types.Func) *ABIParamResultInfo {
 	setup()
 	s := assignState{
-		rTotal: config.regAmounts,
+		stackOffset: config.offsetForLocals,
+		rTotal:      config.regAmounts,
 	}
 	result := &ABIParamResultInfo{config: config}
-	ft := t.FuncType()
-	result.preAllocateParams(t.NumRecvs() != 0, ft.Params.NumFields(), ft.Results.NumFields())
+	result.preAllocateParams(ft.Receiver != nil, ft.Params.NumFields(), ft.Results.NumFields())
 
 	// Receiver
 	// TODO(register args) ? seems like "struct" and "fields" is not right anymore for describing function parameters
-	if t.NumRecvs() != 0 {
+	if ft.Receiver != nil && ft.Receiver.NumFields() != 0 {
 		r := ft.Receiver.FieldSlice()[0]
 		result.inparams = append(result.inparams,
 			s.assignParamOrReturn(r.Type, r.Nname, false))
@@ -264,8 +292,55 @@ func (config *ABIConfig) ABIAnalyze(t *types.Type) *ABIParamResultInfo {
 	result.offsetToSpillArea = alignTo(s.stackOffset, types.RegSize)
 	result.spillAreaSize = alignTo(s.spillOffset, types.RegSize)
 	result.outRegistersUsed = s.rUsed.intRegs + s.rUsed.floatRegs
-
 	return result
+}
+
+// ABIAnalyze returns the same result as ABIAnalyzeFuncType, but also
+// updates the offsets of all the receiver, input, and output fields.
+func (config *ABIConfig) ABIAnalyze(t *types.Type) *ABIParamResultInfo {
+	ft := t.FuncType()
+	result := config.ABIAnalyzeFuncType(ft)
+	// Fill in the frame offsets for receiver, inputs, results
+	k := 0
+	if t.NumRecvs() != 0 {
+		config.updateOffset(result, ft.Receiver.FieldSlice()[0], result.inparams[0], false)
+		k++
+	}
+	for i, f := range ft.Params.FieldSlice() {
+		config.updateOffset(result, f, result.inparams[k+i], false)
+	}
+	for i, f := range ft.Results.FieldSlice() {
+		config.updateOffset(result, f, result.outparams[i], true)
+	}
+	return result
+}
+
+// parameterUpdateMu protects the Offset field of function/method parameters (a subset of structure Fields)
+var parameterUpdateMu sync.Mutex
+
+// FieldOffsetOf returns a concurency-safe version of f.Offset
+func FieldOffsetOf(f *types.Field) int64 {
+	parameterUpdateMu.Lock()
+	defer parameterUpdateMu.Unlock()
+	return f.Offset
+}
+
+func (config *ABIConfig) updateOffset(result *ABIParamResultInfo, f *types.Field, a ABIParamAssignment, isReturn bool) {
+	// Everything except return values in registers has either a frame home (if not in a register) or a frame spill location.
+	if !isReturn || len(a.Registers) == 0 {
+		// The type frame offset DOES NOT show effects of minimum frame size.
+		// Getting this wrong breaks stackmaps, see liveness/plive.go:WriteFuncMap and typebits/typebits.go:Set
+		parameterUpdateMu.Lock()
+		defer parameterUpdateMu.Unlock()
+		off := a.FrameOffset(result) - config.LocalsOffset()
+		fOffset := f.Offset
+		if fOffset == types.BOGUS_FUNARG_OFFSET {
+			// Set the Offset the first time. After that, we may recompute it, but it should never change.
+			f.Offset = off
+		} else if fOffset != off {
+			panic(fmt.Errorf("Offset changed from %d to %d", fOffset, off))
+		}
+	}
 }
 
 //......................................................................
