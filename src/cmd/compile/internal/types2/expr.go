@@ -1185,6 +1185,9 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 		goto Error // error was reported before
 
 	case *syntax.Name:
+		// shizhz - 对符号（标识符：identifier）进行类型检查。从 Scope Chain 中找出该符号对应的对象，然后递归对其进行类型检查。
+		// 如果对象是常量表达式，则同时对其进行初始化
+		// 对表达式进行类型检查是递归进行的，*syntax.Name 与 *syntax.BasicLit 是递归下降的基本情况
 		check.ident(x, e, nil, false)
 
 	case *syntax.DotsType:
@@ -1194,6 +1197,8 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 		goto Error
 
 	case *syntax.BasicLit:
+		// shizhz - 基本类型字面量，判断其实际类型并设值。注意此时类型都是 untyped 的，因为实际类型还要取决于该值的使用场景。
+		// 例如 a :=  1.2 + 3 中，3 实际上的类型会被转换为 float32
 		if e.Bad {
 			goto Error // error reported during parsing
 		}
@@ -1226,6 +1231,7 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 		}
 
 	case *syntax.FuncLit:
+		// shizhz - 先对函数的申明进行类型检查，然后将函数体的类型检查推入 delays
 		if sig, ok := check.typ(e.Type).(*Signature); ok {
 			// Anonymous functions are considered part of the
 			// init expression/func declaration which contains
@@ -1247,6 +1253,8 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 		}
 
 	case *syntax.CompositeLit:
+		// shizhz - 对复合类型的字面量进行类型检查，例如 struct, map, slice 等。对该类型进行检查时，必须知道该字面量的类型
+		// 该类型信息可以是解析语法树时填充进去的，也可以是在类型检查时传递进来的。
 		var typ, base Type
 
 		switch {
