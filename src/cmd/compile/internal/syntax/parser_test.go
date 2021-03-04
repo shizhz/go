@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -373,5 +374,35 @@ func TestLineDirectives(t *testing.T) {
 		if col := pos.RelCol(); col != test.col {
 			t.Errorf("%s: got col = %d; want %d", test.src, col, test.col)
 		}
+	}
+}
+
+func TestParser(t *testing.T) {
+	code := `
+package main
+
+import (
+"fmt"
+"net/http"
+)
+
+const (a, b)
+var names []string = make([]int, 10)
+
+func iterate[T any](list []T, f func(T))  {
+	for _, t  := range list {
+		f(t)
+	}
+
+	return "unexpected"
+}
+`
+
+	ast, _ := Parse(NewFileBase("dump_source.go"), bytes.NewBuffer([]byte(code)), func(err error) {
+		fmt.Printf("Parsing Error: %v\n", err)
+	}, nil, CheckBranches|AllowGenerics)
+
+	if ast != nil {
+		Fdump(os.Stdout, ast)
 	}
 }
