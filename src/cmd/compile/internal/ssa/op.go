@@ -133,6 +133,26 @@ func (a *AuxCall) Reg(i *regInfo, c *Config) *regInfo {
 	a.reg.clobbers = i.clobbers
 	return a.reg
 }
+func (a *AuxCall) ABI() *abi.ABIConfig {
+	return a.abiInfo.Config()
+}
+func (a *AuxCall) ResultReg(c *Config) *regInfo {
+	if a.abiInfo.OutRegistersUsed() == 0 {
+		return a.reg
+	}
+	if len(a.reg.inputs) > 0 {
+		return a.reg
+	}
+	k := 0
+	for _, p := range a.abiInfo.OutParams() {
+		for _, r := range p.Registers {
+			m := archRegForAbiReg(r, c)
+			a.reg.inputs = append(a.reg.inputs, inputInfo{idx: k, regs: (1 << m)})
+			k++
+		}
+	}
+	return a.reg
+}
 
 func archRegForAbiReg(r abi.RegIndex, c *Config) uint8 {
 	var m int8
@@ -142,6 +162,11 @@ func archRegForAbiReg(r abi.RegIndex, c *Config) uint8 {
 		m = c.floatParamRegs[int(r)-len(c.intParamRegs)]
 	}
 	return uint8(m)
+}
+
+// OffsetOfResult returns the SP offset of result which (indexed 0, 1, etc).
+func (a *AuxCall) ParamAssignmentForResult(which int64) *abi.ABIParamAssignment {
+	return a.abiInfo.OutParam(int(which))
 }
 
 // OffsetOfResult returns the SP offset of result which (indexed 0, 1, etc).
@@ -285,10 +310,13 @@ func ClosureAuxCall(args []Param, results []Param, paramResultInfo *abi.ABIParam
 func (*AuxCall) CanBeAnSSAAux() {}
 
 // OwnAuxCall returns a function's own AuxCall
-
 func OwnAuxCall(fn *obj.LSym, args []Param, results []Param, paramResultInfo *abi.ABIParamResultInfo) *AuxCall {
 	// TODO if this remains identical to ClosureAuxCall above after new ABI is done, should deduplicate.
-	return &AuxCall{Fn: fn, args: args, results: results, abiInfo: paramResultInfo}
+	var reg *regInfo
+	if paramResultInfo.InRegistersUsed()+paramResultInfo.OutRegistersUsed() > 0 {
+		reg = &regInfo{}
+	}
+	return &AuxCall{Fn: fn, args: args, results: results, abiInfo: paramResultInfo, reg: reg}
 }
 
 const (

@@ -221,7 +221,7 @@ func AbiForFunc(fn *ir.Func) *abi.ABIConfig {
 // Passing a nil function returns ABIInternal.
 func abiForFunc(fn *ir.Func, abi0, abi1 *abi.ABIConfig) *abi.ABIConfig {
 	a := abi1
-	if true || objabi.Regabi_enabled == 0 {
+	if !regabiEnabledForAllCompilation() {
 		a = abi0
 	}
 	if fn != nil && fn.Pragma&ir.RegisterParams != 0 { // TODO(register args) remove after register abi is working
@@ -230,9 +230,13 @@ func abiForFunc(fn *ir.Func, abi0, abi1 *abi.ABIConfig) *abi.ABIConfig {
 			base.ErrorfAt(fn.Pos(), "Calls to //go:registerparams method %s won't work, remove the pragma from the declaration.", name)
 		}
 		a = abi1
-		base.WarnfAt(fn.Pos(), "declared function %v has register params", fn)
 	}
 	return a
+}
+
+func regabiEnabledForAllCompilation() bool {
+	// TODO compiler does not yet change behavior for GOEXPERIMENT=regabi
+	return false && objabi.Regabi_enabled != 0
 }
 
 // getParam returns the Field of ith param of node n (which is a
@@ -550,19 +554,19 @@ func buildssa(fn *ir.Func, worker int) *ssa.Func {
 				}
 				s.vars[n] = v
 				s.addNamedValue(n, v) // This helps with debugging information, not needed for compilation itself.
-			} else if !s.canSSAName(n) { // I.e., the address was taken.  The type may or may not be okay.
-				// If the value will arrive in registers,
-				// AND if it can be SSA'd (if it cannot, panic for now),
-				// THEN
-				// (1) receive it as an OpArg (but do not store its name in the var table)
-				// (2) store it to its spill location, which is its address as well.
+			} else { // address was taken AND/OR too large for SSA
 				paramAssignment := ssa.ParamAssignmentForArgName(s.f, n)
 				if len(paramAssignment.Registers) > 0 {
-					if !TypeOK(n.Type()) { // TODO register args -- if v is not an SSA-able type, must decompose, here.
-						panic(fmt.Errorf("Arg in registers is too big to be SSA'd, need to implement decomposition, type=%v, n=%v", n.Type(), n))
+					if TypeOK(n.Type()) { // SSA-able type, so address was taken -- receive value in OpArg, DO NOT bind to var, store immediately to memory.
+						v := s.newValue0A(ssa.OpArg, n.Type(), n)
+						s.store(n.Type(), s.decladdrs[n], v)
+					} else { // Too big for SSA.
+						// Brute force, and early, do a bunch of stores from registers
+						// TODO fix the nasty storeArgOrLoad recursion in ssa/expand_calls.go so this Just Works with store of a big Arg.
+						abi := s.f.ABISelf
+						addr := s.decladdrs[n]
+						s.storeParameterRegsToStack(abi, paramAssignment, n, addr)
 					}
-					v := s.newValue0A(ssa.OpArg, n.Type(), n)
-					s.store(n.Type(), s.decladdrs[n], v)
 				}
 			}
 		}
@@ -635,6 +639,20 @@ func buildssa(fn *ir.Func, worker int) *ssa.Func {
 	}
 
 	return s.f
+}
+
+func (s *state) storeParameterRegsToStack(abi *abi.ABIConfig, paramAssignment *abi.ABIParamAssignment, n *ir.Name, addr *ssa.Value) {
+	typs, offs := paramAssignment.RegisterTypesAndOffsets()
+	for i, t := range typs {
+		r := paramAssignment.Registers[i]
+		o := offs[i]
+		op, reg := ssa.ArgOpAndRegisterFor(r, abi)
+		aux := &ssa.AuxNameOffset{Name: n, Offset: o}
+		v := s.newValue0I(op, t, reg)
+		v.Aux = aux
+		p := s.newValue1I(ssa.OpOffPtr, types.NewPtr(t), o, addr)
+		s.store(t, p, v)
+	}
 }
 
 // zeroResults zeros the return values at the start of the function.
@@ -2957,12 +2975,7 @@ func (s *state) expr(n ir.Node) *ssa.Value {
 		if which == -1 {
 			panic(fmt.Errorf("ORESULT %v does not match call %s", n, s.prevCall))
 		}
-		if TypeOK(n.Type()) {
-			return s.newValue1I(ssa.OpSelectN, n.Type(), which, s.prevCall)
-		} else {
-			addr := s.newValue1I(ssa.OpSelectNAddr, types.NewPtr(n.Type()), which, s.prevCall)
-			return s.rawLoad(n.Type(), addr)
-		}
+		return s.resultOfCall(s.prevCall, which, n.Type())
 
 	case ir.ODEREF:
 		n := n.(*ir.StarExpr)
@@ -3161,6 +3174,30 @@ func (s *state) expr(n ir.Node) *ssa.Value {
 		s.Fatalf("unhandled expr %v", n.Op())
 		return nil
 	}
+}
+
+func (s *state) resultOfCall(c *ssa.Value, which int64, t *types.Type) *ssa.Value {
+	aux := c.Aux.(*ssa.AuxCall)
+	pa := aux.ParamAssignmentForResult(which)
+	// TODO(register args) determine if in-memory TypeOK is better loaded early from SelectNAddr or later when SelectN is expanded.
+	// SelectN is better for pattern-matching and possible call-aware analysis we might want to do in the future.
+	if len(pa.Registers) == 0 && !TypeOK(t) {
+		addr := s.newValue1I(ssa.OpSelectNAddr, types.NewPtr(t), which, c)
+		return s.rawLoad(t, addr)
+	}
+	return s.newValue1I(ssa.OpSelectN, t, which, c)
+}
+
+func (s *state) resultAddrOfCall(c *ssa.Value, which int64, t *types.Type) *ssa.Value {
+	aux := c.Aux.(*ssa.AuxCall)
+	pa := aux.ParamAssignmentForResult(which)
+	if len(pa.Registers) == 0 {
+		return s.newValue1I(ssa.OpSelectNAddr, types.NewPtr(t), which, c)
+	}
+	_, addr := s.temp(c.Pos, t)
+	rval := s.newValue1I(ssa.OpSelectN, t, which, c)
+	s.vars[memVar] = s.newValue3Apos(ssa.OpStore, types.TypeMem, t, addr, rval, s.mem(), false)
+	return addr
 }
 
 // append converts an OAPPEND node to SSA.
@@ -4838,9 +4875,6 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool) *ssa.Val
 			inRegistersImported := fn.Pragma()&ir.RegisterParams != 0
 			inRegistersSamePackage := fn.Func != nil && fn.Func.Pragma&ir.RegisterParams != 0
 			inRegisters = inRegistersImported || inRegistersSamePackage
-			if inRegisters {
-				s.f.Warnl(n.Pos(), "called function %v has register params", callee)
-			}
 			break
 		}
 		closure = s.expr(fn)
@@ -5060,10 +5094,8 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool) *ssa.Val
 	}
 	fp := res.Field(0)
 	if returnResultAddr {
-		pt := types.NewPtr(fp.Type)
-		return s.newValue1I(ssa.OpSelectNAddr, pt, 0, call)
+		return s.resultAddrOfCall(call, 0, fp.Type)
 	}
-
 	return s.newValue1I(ssa.OpSelectN, fp.Type, 0, call)
 }
 
@@ -5161,9 +5193,7 @@ func (s *state) addr(n ir.Node) *ssa.Value {
 	case ir.ORESULT:
 		// load return from callee
 		n := n.(*ir.ResultExpr)
-		x := s.newValue1I(ssa.OpSelectNAddr, t, n.Index, s.prevCall)
-		return x
-
+		return s.resultAddrOfCall(s.prevCall, n.Index, n.Type())
 	case ir.OINDEX:
 		n := n.(*ir.IndexExpr)
 		if n.X.Type().IsSlice() {
@@ -5520,12 +5550,7 @@ func (s *state) rtcall(fn *obj.LSym, returns bool, results []*types.Type, args .
 	res := make([]*ssa.Value, len(results))
 	for i, t := range results {
 		off = types.Rnd(off, t.Alignment())
-		if TypeOK(t) {
-			res[i] = s.newValue1I(ssa.OpSelectN, t, int64(i), call)
-		} else {
-			addr := s.newValue1I(ssa.OpSelectNAddr, types.NewPtr(t), int64(i), call)
-			res[i] = s.rawLoad(t, addr)
-		}
+		res[i] = s.resultOfCall(call, int64(i), t)
 		off += t.Size()
 	}
 	off = types.Rnd(off, int64(types.PtrSize))
@@ -6225,9 +6250,7 @@ func (s *state) dottype(n *ir.TypeAssertExpr, commaok bool) (res, resok *ssa.Val
 	if commaok && !TypeOK(n.Type()) {
 		// unSSAable type, use temporary.
 		// TODO: get rid of some of these temporaries.
-		tmp = typecheck.TempAt(n.Pos(), s.curfn, n.Type())
-		s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, tmp.(*ir.Name), s.mem())
-		addr = s.addr(tmp)
+		tmp, addr = s.temp(n.Pos(), n.Type())
 	}
 
 	cond := s.newValue2(ssa.OpEqPtr, types.Types[types.TBOOL], itab, targetITab)
@@ -6307,6 +6330,14 @@ func (s *state) dottype(n *ir.TypeAssertExpr, commaok bool) (res, resok *ssa.Val
 	resok = s.variable(okVar, types.Types[types.TBOOL])
 	delete(s.vars, okVar)
 	return res, resok
+}
+
+// temp allocates a temp of type t at position pos
+func (s *state) temp(pos src.XPos, t *types.Type) (*ir.Name, *ssa.Value) {
+	tmp := typecheck.TempAt(pos, s.curfn, t)
+	s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, tmp, s.mem())
+	addr := s.addr(tmp)
+	return tmp, addr
 }
 
 // variable returns the value of a variable at the current location.
@@ -6402,6 +6433,10 @@ type State struct {
 
 	// wasm: The number of values on the WebAssembly stack. This is only used as a safeguard.
 	OnWasmStackSkipped int
+}
+
+func (s *State) FuncInfo() *obj.FuncInfo {
+	return s.pp.CurFunc.LSym.Func()
 }
 
 // Prog appends a new Prog.
@@ -6561,11 +6596,9 @@ func genssa(f *ssa.Func, pp *objw.Progs) {
 				// memory arg needs no code
 			case ssa.OpArg:
 				// input args need no code
-			case ssa.OpArgIntReg, ssa.OpArgFloatReg:
-				CheckArgReg(v)
 			case ssa.OpSP, ssa.OpSB:
 				// nothing to do
-			case ssa.OpSelect0, ssa.OpSelect1, ssa.OpSelectN:
+			case ssa.OpSelect0, ssa.OpSelect1, ssa.OpSelectN, ssa.OpMakeResult:
 				// nothing to do
 			case ssa.OpGetG:
 				// nothing to do when there's a g register,
@@ -7468,6 +7501,39 @@ func deferstruct(stksize int64) *types.Type {
 	s.SetNoalg(true)
 	types.CalcStructSize(s)
 	return s
+}
+
+// SlotAddr uses LocalSlot information to initialize an obj.Addr
+// The resulting addr is used in a non-standard context -- in the prologue
+// of a function, before the frame has been constructed, so the standard
+// addressing for the parameters will be wrong.
+func SpillSlotAddr(slot *ssa.LocalSlot, baseReg int16, extraOffset int64) obj.Addr {
+	n, off := slot.N, slot.Off
+	if n.Class != ir.PPARAM && n.Class != ir.PPARAMOUT {
+		panic("Only expected to see param and returns here")
+	}
+	return obj.Addr{
+		Name:   obj.NAME_NONE,
+		Type:   obj.TYPE_MEM,
+		Reg:    baseReg,
+		Offset: off + extraOffset + n.FrameOffset(),
+	}
+}
+
+// AddrForParamSlot fills in an Addr appropriately for a Spill,
+// Restore, or VARLIVE.
+func AddrForParamSlot(slot *ssa.LocalSlot, addr *obj.Addr) {
+	// TODO replace this boilerplate in a couple of places.
+	n, off := slot.N, slot.Off
+	addr.Type = obj.TYPE_MEM
+	addr.Sym = n.Linksym()
+	addr.Offset = off
+	if n.Class == ir.PPARAM || n.Class == ir.PPARAMOUT {
+		addr.Name = obj.NAME_PARAM
+		addr.Offset += n.FrameOffset()
+	} else {
+		addr.Name = obj.NAME_AUTO
+	}
 }
 
 var (
