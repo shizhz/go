@@ -5,6 +5,7 @@
 package abi
 
 import (
+	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
 	"cmd/internal/src"
 	"fmt"
@@ -98,6 +99,115 @@ func (a *ABIParamAssignment) Offset() int32 {
 		panic("Register allocated parameters have no offset")
 	}
 	return a.offset
+}
+
+// RegisterTypes returns a slice of the types of the registers
+// corresponding to a slice of parameters.  The returned slice
+// has capacity for one more, likely a memory type.
+func RegisterTypes(apa []ABIParamAssignment) []*types.Type {
+	rcount := 0
+	for _, pa := range apa {
+		rcount += len(pa.Registers)
+	}
+	if rcount == 0 {
+		// Note that this catches top-level struct{} and [0]Foo, which are stack allocated.
+		return make([]*types.Type, 0, 1)
+	}
+	rts := make([]*types.Type, 0, rcount+1)
+	for _, pa := range apa {
+		if len(pa.Registers) == 0 {
+			continue
+		}
+		rts = appendParamTypes(rts, pa.Type)
+	}
+	return rts
+}
+
+func (pa *ABIParamAssignment) RegisterTypesAndOffsets() ([]*types.Type, []int64) {
+	l := len(pa.Registers)
+	if l == 0 {
+		return nil, nil
+	}
+	typs := make([]*types.Type, 0, l)
+	offs := make([]int64, 0, l)
+	return appendParamTypes(typs, pa.Type), appendParamOffsets(offs, 0, pa.Type)
+}
+
+func appendParamTypes(rts []*types.Type, t *types.Type) []*types.Type {
+	if t.IsScalar() || t.IsPtrShaped() {
+		if t.IsComplex() {
+			c := types.FloatForComplex(t)
+			return append(rts, c, c)
+		} else {
+			if int(t.Size()) <= types.RegSize {
+				return append(rts, t)
+			}
+			// assume 64bit int on 32-bit machine
+			// TODO endianness? Should high-order (sign bits) word come first?
+			if t.IsSigned() {
+				rts = append(rts, types.Types[types.TINT32])
+			} else {
+				rts = append(rts, types.Types[types.TUINT32])
+			}
+			return append(rts, types.Types[types.TUINT32])
+		}
+	} else {
+		typ := t.Kind()
+		switch typ {
+		case types.TARRAY:
+			for i := int64(0); i < t.Size(); i++ { // 0 gets no registers, plus future-proofing.
+				rts = appendParamTypes(rts, t.Elem())
+			}
+		case types.TSTRUCT:
+			for _, f := range t.FieldSlice() {
+				if f.Type.Size() > 0 { // embedded zero-width types receive no registers
+					rts = appendParamTypes(rts, f.Type)
+				}
+			}
+		case types.TSLICE:
+			return appendParamTypes(rts, synthSlice)
+		case types.TSTRING:
+			return appendParamTypes(rts, synthString)
+		case types.TINTER:
+			return appendParamTypes(rts, synthIface)
+		}
+	}
+	return rts
+}
+
+// appendParamOffsets appends the offset(s) of type t, starting from "at",
+// to input offsets, and returns the longer slice.
+func appendParamOffsets(offsets []int64, at int64, t *types.Type) []int64 {
+	at = align(at, t)
+	if t.IsScalar() || t.IsPtrShaped() {
+		if t.IsComplex() || int(t.Width) > types.RegSize { // complex and *int64 on 32-bit
+			s := t.Width / 2
+			return append(offsets, at, at+s)
+		} else {
+			return append(offsets, at)
+		}
+	} else {
+		typ := t.Kind()
+		switch typ {
+		case types.TARRAY:
+			for i := int64(0); i < t.NumElem(); i++ {
+				offsets = appendParamOffsets(offsets, at, t.Elem())
+			}
+			return offsets
+		case types.TSTRUCT:
+			for _, f := range t.FieldSlice() {
+				offsets = appendParamOffsets(offsets, at, f.Type)
+				at += f.Type.Width
+			}
+		case types.TSLICE:
+			return appendParamOffsets(offsets, at, synthSlice)
+		case types.TSTRING:
+			return appendParamOffsets(offsets, at, synthString)
+		case types.TINTER:
+			return appendParamOffsets(offsets, at, synthIface)
+		}
+	}
+	return offsets
 }
 
 // SpillOffset returns the offset *within the spill area* for the parameter that "a" describes.
@@ -337,6 +447,9 @@ func (config *ABIConfig) updateOffset(result *ABIParamResultInfo, f *types.Field
 		if fOffset == types.BOGUS_FUNARG_OFFSET {
 			// Set the Offset the first time. After that, we may recompute it, but it should never change.
 			f.Offset = off
+			if f.Nname != nil {
+				f.Nname.(*ir.Name).SetFrameOffset(off)
+			}
 		} else if fOffset != off {
 			panic(fmt.Errorf("Offset changed from %d to %d", fOffset, off))
 		}
