@@ -4564,6 +4564,9 @@ func findIntrinsic(sym *types.Sym) intrinsicBuilder {
 	if sym.Pkg == types.LocalPkg {
 		pkg = base.Ctxt.Pkgpath
 	}
+	if sym.Pkg == ir.Pkgs.Runtime {
+		pkg = "runtime"
+	}
 	if base.Flag.Race && pkg == "sync/atomic" {
 		// The race detector needs to be able to intercept these calls.
 		// We can't intrinsify them.
@@ -5172,10 +5175,6 @@ func (s *state) addr(n ir.Node) *ssa.Value {
 			v := s.decladdrs[n]
 			if v != nil {
 				return v
-			}
-			if n == ir.RegFP {
-				// Special arg that points to the frame pointer (Used by ORECOVER).
-				return s.entryNewValue2A(ssa.OpLocalAddr, t, n, s.sp, s.startmem)
 			}
 			s.Fatalf("addr of undeclared ONAME %v. declared: %v", n, s.decladdrs)
 			return nil

@@ -446,7 +446,11 @@ func typecheck(n ir.Node, top int) (res ir.Node) {
 	case top&(ctxType|ctxExpr) == ctxType && n.Op() != ir.OTYPE && n.Op() != ir.ONONAME && (t != nil || n.Op() == ir.ONAME):
 		base.Errorf("%v is not a type", n)
 		if t != nil {
-			n.SetType(nil)
+			if n.Op() == ir.ONAME {
+				t.SetBroke(true)
+			} else {
+				n.SetType(nil)
+			}
 		}
 
 	}
@@ -482,7 +486,9 @@ func typecheck1(n ir.Node, top int) ir.Node {
 
 	case ir.OLITERAL:
 		if n.Sym() == nil && n.Type() == nil {
-			base.Fatalf("literal missing type: %v", n)
+			if !n.Diag() {
+				base.Fatalf("literal missing type: %v", n)
+			}
 		}
 		return n
 
@@ -876,7 +882,7 @@ func typecheck1(n ir.Node, top int) ir.Node {
 	case ir.OTYPESW:
 		n := n.(*ir.TypeSwitchGuard)
 		base.Errorf("use of .(type) outside type switch")
-		n.SetType(nil)
+		n.SetDiag(true)
 		return n
 
 	case ir.ODCLFUNC:
@@ -2104,7 +2110,7 @@ func CheckUnused(fn *ir.Func) {
 
 // CheckReturn makes sure that fn terminates appropriately.
 func CheckReturn(fn *ir.Func) {
-	if fn.Type().NumResults() != 0 && len(fn.Body) != 0 {
+	if fn.Type() != nil && fn.Type().NumResults() != 0 && len(fn.Body) != 0 {
 		markBreak(fn)
 		if !isTermNodes(fn.Body) {
 			base.ErrorfAt(fn.Endlineno, "missing return at end of function")
