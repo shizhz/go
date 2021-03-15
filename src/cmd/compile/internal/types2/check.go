@@ -261,10 +261,16 @@ func (check *Checker) checkFiles(files []*syntax.File) (err error) {
 	}
 
 	print("== initFiles ==")
+	// shizhz - 检查所有 AST 是否属于同一个包，初始化如下字段：
+	// - checker.files
 	check.initFiles(files)
 
 	print("== collectObjects ==")
-	// shizhz - 将 AST 中的声明转换成 Object 与 declInfo, 然后存放在 checker 中。检查命名冲突，并将类型方法组织在一起
+	// shizhz - 将 AST 中的声明转换成 Object 与 declInfo, 然后存放在 checker 中。检查命名冲突，并将结构体的方法组织在一起
+	// 相当于类型检查的预处理逻辑，方法初始化了如下字段：
+	// - info.Defs
+	// - checker.methods
+	// - checker.objMap
 	check.collectObjects()
 
 	print("== packageObjects ==")

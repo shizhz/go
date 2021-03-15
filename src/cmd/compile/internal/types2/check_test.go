@@ -297,7 +297,17 @@ func TestTypecheckConst(t *testing.T) {
 	code := `
 package p
 
-const name = "strinG" + " " + " g"
+// type user struct {
+// 	name string
+// }
+
+// func (this user) name() {
+
+// }
+
+type A struct {
+    self A
+}
 `
 
 	f, err := parseSrc("testTypecheckConst", code)
