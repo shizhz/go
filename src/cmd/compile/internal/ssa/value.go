@@ -198,12 +198,12 @@ func (v *Value) auxString() string {
 		if v.Aux != nil {
 			return fmt.Sprintf(" {%v}", v.Aux)
 		}
-	case auxSymOff, auxCallOff, auxTypSize:
+	case auxSymOff, auxCallOff, auxTypSize, auxNameOffsetInt8:
 		s := ""
 		if v.Aux != nil {
 			s = fmt.Sprintf(" {%v}", v.Aux)
 		}
-		if v.AuxInt != 0 {
+		if v.AuxInt != 0 || opcodeTable[v.Op].auxType == auxNameOffsetInt8 {
 			s += fmt.Sprintf(" [%v]", v.AuxInt)
 		}
 		return s
@@ -499,7 +499,7 @@ func (v *Value) removeable() bool {
 		return false
 	}
 	if v.Type.IsMemory() {
-		// All memory ops aren't needed here, but we do need
+		// We don't need to preserve all memory ops, but we do need
 		// to keep calls at least (because they might have
 		// synchronization operations we can't see).
 		return false
