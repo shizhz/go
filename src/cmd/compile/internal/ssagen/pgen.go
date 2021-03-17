@@ -19,7 +19,6 @@ import (
 	"cmd/internal/obj"
 	"cmd/internal/objabi"
 	"cmd/internal/src"
-	"cmd/internal/sys"
 )
 
 // cmpstackvarlt reports whether the stack variable a sorts before b.
@@ -93,12 +92,7 @@ func (s *ssafn) AllocFrame(f *ssa.Func) {
 		for _, v := range b.Values {
 			if n, ok := v.Aux.(*ir.Name); ok {
 				switch n.Class {
-				case ir.PPARAM, ir.PPARAMOUT:
-					// Don't modify RegFP; it is a global.
-					if n != ir.RegFP {
-						n.SetUsed(true)
-					}
-				case ir.PAUTO:
+				case ir.PPARAM, ir.PPARAMOUT, ir.PAUTO:
 					n.SetUsed(true)
 				}
 			}
@@ -137,9 +131,6 @@ func (s *ssafn) AllocFrame(f *ssa.Func) {
 			lastHasPtr = true
 		} else {
 			lastHasPtr = false
-		}
-		if Arch.LinkArch.InFamily(sys.ARM, sys.PPC64) {
-			s.stksize = types.Rnd(s.stksize, int64(types.PtrSize))
 		}
 		n.SetFrameOffset(-s.stksize)
 	}

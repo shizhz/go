@@ -130,10 +130,15 @@ func (pa *ABIParamAssignment) RegisterTypesAndOffsets() ([]*types.Type, []int64)
 	}
 	typs := make([]*types.Type, 0, l)
 	offs := make([]int64, 0, l)
-	return appendParamTypes(typs, pa.Type), appendParamOffsets(offs, 0, pa.Type)
+	offs, _ = appendParamOffsets(offs, 0, pa.Type)
+	return appendParamTypes(typs, pa.Type), offs
 }
 
 func appendParamTypes(rts []*types.Type, t *types.Type) []*types.Type {
+	w := t.Width
+	if w == 0 {
+		return rts
+	}
 	if t.IsScalar() || t.IsPtrShaped() {
 		if t.IsComplex() {
 			c := types.FloatForComplex(t)
@@ -176,28 +181,30 @@ func appendParamTypes(rts []*types.Type, t *types.Type) []*types.Type {
 }
 
 // appendParamOffsets appends the offset(s) of type t, starting from "at",
-// to input offsets, and returns the longer slice.
-func appendParamOffsets(offsets []int64, at int64, t *types.Type) []int64 {
+// to input offsets, and returns the longer slice and the next unused offset.
+func appendParamOffsets(offsets []int64, at int64, t *types.Type) ([]int64, int64) {
 	at = align(at, t)
+	w := t.Width
+	if w == 0 {
+		return offsets, at
+	}
 	if t.IsScalar() || t.IsPtrShaped() {
 		if t.IsComplex() || int(t.Width) > types.RegSize { // complex and *int64 on 32-bit
-			s := t.Width / 2
-			return append(offsets, at, at+s)
+			s := w / 2
+			return append(offsets, at, at+s), at + w
 		} else {
-			return append(offsets, at)
+			return append(offsets, at), at + w
 		}
 	} else {
 		typ := t.Kind()
 		switch typ {
 		case types.TARRAY:
 			for i := int64(0); i < t.NumElem(); i++ {
-				offsets = appendParamOffsets(offsets, at, t.Elem())
+				offsets, at = appendParamOffsets(offsets, at, t.Elem())
 			}
-			return offsets
 		case types.TSTRUCT:
 			for _, f := range t.FieldSlice() {
-				offsets = appendParamOffsets(offsets, at, f.Type)
-				at += f.Type.Width
+				offsets, at = appendParamOffsets(offsets, at, f.Type)
 			}
 		case types.TSLICE:
 			return appendParamOffsets(offsets, at, synthSlice)
@@ -207,7 +214,7 @@ func appendParamOffsets(offsets []int64, at int64, t *types.Type) []int64 {
 			return appendParamOffsets(offsets, at, synthIface)
 		}
 	}
-	return offsets
+	return offsets, at
 }
 
 // SpillOffset returns the offset *within the spill area* for the parameter that "a" describes.
@@ -470,9 +477,9 @@ func (c *RegAmounts) regString(r RegIndex) string {
 	return fmt.Sprintf("<?>%d", r)
 }
 
-// toString method renders an ABIParamAssignment in human-readable
+// ToString method renders an ABIParamAssignment in human-readable
 // form, suitable for debugging or unit testing.
-func (ri *ABIParamAssignment) toString(config *ABIConfig) string {
+func (ri *ABIParamAssignment) ToString(config *ABIConfig, extra bool) string {
 	regs := "R{"
 	offname := "spilloffset" // offset is for spill for register(s)
 	if len(ri.Registers) == 0 {
@@ -480,19 +487,25 @@ func (ri *ABIParamAssignment) toString(config *ABIConfig) string {
 	}
 	for _, r := range ri.Registers {
 		regs += " " + config.regAmounts.regString(r)
+		if extra {
+			regs += fmt.Sprintf("(%d)", r)
+		}
+	}
+	if extra {
+		regs += fmt.Sprintf(" | #I=%d, #F=%d", config.regAmounts.intRegs, config.regAmounts.floatRegs)
 	}
 	return fmt.Sprintf("%s } %s: %d typ: %v", regs, offname, ri.offset, ri.Type)
 }
 
-// toString method renders an ABIParamResultInfo in human-readable
+// String method renders an ABIParamResultInfo in human-readable
 // form, suitable for debugging or unit testing.
 func (ri *ABIParamResultInfo) String() string {
 	res := ""
 	for k, p := range ri.inparams {
-		res += fmt.Sprintf("IN %d: %s\n", k, p.toString(ri.config))
+		res += fmt.Sprintf("IN %d: %s\n", k, p.ToString(ri.config, false))
 	}
 	for k, r := range ri.outparams {
-		res += fmt.Sprintf("OUT %d: %s\n", k, r.toString(ri.config))
+		res += fmt.Sprintf("OUT %d: %s\n", k, r.ToString(ri.config, false))
 	}
 	res += fmt.Sprintf("offsetToSpillArea: %d spillAreaSize: %d",
 		ri.offsetToSpillArea, ri.spillAreaSize)
@@ -530,25 +543,54 @@ func (state *assignState) stackSlot(t *types.Type) int64 {
 	return rv
 }
 
-// allocateRegs returns a set of register indices for a parameter or result
+// allocateRegs returns an ordered list of register indices for a parameter or result
 // that we've just determined to be register-assignable. The number of registers
 // needed is assumed to be stored in state.pUsed.
-func (state *assignState) allocateRegs() []RegIndex {
-	regs := []RegIndex{}
-
-	// integer
-	for r := state.rUsed.intRegs; r < state.rUsed.intRegs+state.pUsed.intRegs; r++ {
-		regs = append(regs, RegIndex(r))
+func (state *assignState) allocateRegs(regs []RegIndex, t *types.Type) []RegIndex {
+	if t.Width == 0 {
+		return regs
 	}
-	state.rUsed.intRegs += state.pUsed.intRegs
-
-	// floating
-	for r := state.rUsed.floatRegs; r < state.rUsed.floatRegs+state.pUsed.floatRegs; r++ {
-		regs = append(regs, RegIndex(r+state.rTotal.intRegs))
+	ri := state.rUsed.intRegs
+	rf := state.rUsed.floatRegs
+	if t.IsScalar() || t.IsPtrShaped() {
+		if t.IsComplex() {
+			regs = append(regs, RegIndex(rf+state.rTotal.intRegs), RegIndex(rf+1+state.rTotal.intRegs))
+			rf += 2
+		} else if t.IsFloat() {
+			regs = append(regs, RegIndex(rf+state.rTotal.intRegs))
+			rf += 1
+		} else {
+			n := (int(t.Size()) + types.RegSize - 1) / types.RegSize
+			for i := 0; i < n; i++ { // looking ahead to really big integers
+				regs = append(regs, RegIndex(ri))
+				ri += 1
+			}
+		}
+		state.rUsed.intRegs = ri
+		state.rUsed.floatRegs = rf
+		return regs
+	} else {
+		typ := t.Kind()
+		switch typ {
+		case types.TARRAY:
+			for i := int64(0); i < t.NumElem(); i++ {
+				regs = state.allocateRegs(regs, t.Elem())
+			}
+			return regs
+		case types.TSTRUCT:
+			for _, f := range t.FieldSlice() {
+				regs = state.allocateRegs(regs, f.Type)
+			}
+			return regs
+		case types.TSLICE:
+			return state.allocateRegs(regs, synthSlice)
+		case types.TSTRING:
+			return state.allocateRegs(regs, synthString)
+		case types.TINTER:
+			return state.allocateRegs(regs, synthIface)
+		}
 	}
-	state.rUsed.floatRegs += state.pUsed.floatRegs
-
-	return regs
+	panic(fmt.Errorf("Was not expecting type %s", t))
 }
 
 // regAllocate creates a register ABIParamAssignment object for a param
@@ -564,7 +606,7 @@ func (state *assignState) regAllocate(t *types.Type, name types.Object, isReturn
 	return ABIParamAssignment{
 		Type:      t,
 		Name:      name,
-		Registers: state.allocateRegs(),
+		Registers: state.allocateRegs([]RegIndex{}, t),
 		offset:    int32(spillLoc),
 	}
 }

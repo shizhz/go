@@ -46,6 +46,14 @@ var NetpollGenericInit = netpollGenericInit
 var Memmove = memmove
 var MemclrNoHeapPointers = memclrNoHeapPointers
 
+var LockPartialOrder = lockPartialOrder
+
+type LockRank lockRank
+
+func (l LockRank) String() string {
+	return lockRank(l).String()
+}
+
 const PreemptMSupported = preemptMSupported
 
 type LFNode struct {
@@ -1211,4 +1219,19 @@ func (th *TimeHistogram) Count(bucket, subBucket uint) (uint64, bool) {
 
 func (th *TimeHistogram) Record(duration int64) {
 	(*timeHistogram)(th).record(duration)
+}
+
+func SetIntArgRegs(a int) int {
+	lock(&finlock)
+	old := intArgRegs
+	intArgRegs = a
+	unlock(&finlock)
+	return old
+}
+
+func FinalizerGAsleep() bool {
+	lock(&finlock)
+	result := fingwait
+	unlock(&finlock)
+	return result
 }

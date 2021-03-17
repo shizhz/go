@@ -732,6 +732,8 @@ const (
 	OpAMD64SARLconst
 	OpAMD64SARWconst
 	OpAMD64SARBconst
+	OpAMD64SHRDQ
+	OpAMD64SHLDQ
 	OpAMD64ROLQ
 	OpAMD64ROLL
 	OpAMD64ROLW
@@ -9102,6 +9104,40 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:         "SHRDQ",
+		argLen:       3,
+		resultInArg0: true,
+		clobberFlags: true,
+		asm:          x86.ASHRQ,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{2, 2},     // CX
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{1, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
+		name:         "SHLDQ",
+		argLen:       3,
+		resultInArg0: true,
+		clobberFlags: true,
+		asm:          x86.ASHLQ,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{2, 2},     // CX
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{1, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
 		name:         "ROLQ",
 		argLen:       2,
 		resultInArg0: true,
@@ -13239,7 +13275,7 @@ var opcodeTable = [...]opInfo{
 	{
 		name:         "CALLclosure",
 		auxType:      auxCallOff,
-		argLen:       3,
+		argLen:       -1,
 		clobberFlags: true,
 		call:         true,
 		reg: regInfo{
@@ -13253,7 +13289,7 @@ var opcodeTable = [...]opInfo{
 	{
 		name:         "CALLinter",
 		auxType:      auxCallOff,
-		argLen:       2,
+		argLen:       -1,
 		clobberFlags: true,
 		call:         true,
 		reg: regInfo{
@@ -35560,7 +35596,7 @@ var opcodeTable = [...]opInfo{
 	{
 		name:    "ClosureCall",
 		auxType: auxCallOff,
-		argLen:  3,
+		argLen:  -1,
 		call:    true,
 		generic: true,
 	},
@@ -35574,7 +35610,7 @@ var opcodeTable = [...]opInfo{
 	{
 		name:    "InterCall",
 		auxType: auxCallOff,
-		argLen:  2,
+		argLen:  -1,
 		call:    true,
 		generic: true,
 	},
