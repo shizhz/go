@@ -73,7 +73,7 @@ func (g *irgen) stencil() {
 				// immediately called.
 				foundFuncInst = true
 			}
-			if n.Op() != ir.OCALLFUNC || n.(*ir.CallExpr).X.Op() != ir.OFUNCINST {
+			if n.Op() != ir.OCALL || n.(*ir.CallExpr).X.Op() != ir.OFUNCINST {
 				return
 			}
 			// We have found a function call using a generic function
@@ -95,6 +95,9 @@ func (g *irgen) stencil() {
 				copy(withRecv[1:], call.Args)
 				call.Args = withRecv
 			}
+			// Transform the Call now, which changes OCALL
+			// to OCALLFUNC and does typecheckaste/assignconvfn.
+			transformCall(call)
 			modified = true
 		})
 
@@ -326,8 +329,13 @@ func (subst *subster) node(n ir.Node) ir.Node {
 				m.SetIsClosureVar(true)
 			}
 			t := x.Type()
-			newt := subst.typ(t)
-			m.SetType(newt)
+			if t == nil {
+				assert(name.BuiltinOp != 0)
+			} else {
+				newt := subst.typ(t)
+				m.SetType(newt)
+			}
+			m.BuiltinOp = name.BuiltinOp
 			m.Curfn = subst.newf
 			m.Class = name.Class
 			m.Func = name.Func
@@ -348,7 +356,8 @@ func (subst *subster) node(n ir.Node) ir.Node {
 				// an error.
 				_, isCallExpr := m.(*ir.CallExpr)
 				_, isStructKeyExpr := m.(*ir.StructKeyExpr)
-				if !isCallExpr && !isStructKeyExpr {
+				if !isCallExpr && !isStructKeyExpr && x.Op() != ir.OPANIC &&
+					x.Op() != ir.OCLOSE {
 					base.Fatalf(fmt.Sprintf("Nil type for %v", x))
 				}
 			} else if x.Op() != ir.OCLOSURE {
@@ -357,39 +366,110 @@ func (subst *subster) node(n ir.Node) ir.Node {
 		}
 		ir.EditChildren(m, edit)
 
-		if x.Op() == ir.OXDOT {
-			// A method value/call via a type param will have been left as an
-			// OXDOT. When we see this during stenciling, finish the
-			// typechecking, now that we have the instantiated receiver type.
-			// We need to do this now, since the access/selection to the
-			// method for the real type is very different from the selection
-			// for the type param.
-			m.SetTypecheck(0)
-			// m will transform to an OCALLPART
-			typecheck.Expr(m)
-		}
-		if x.Op() == ir.OCALL {
-			call := m.(*ir.CallExpr)
-			if call.X.Op() == ir.OTYPE {
-				// Do typechecking on a conversion, now that we
-				// know the type argument.
-				m.SetTypecheck(0)
-				m = typecheck.Expr(m)
-			} else if call.X.Op() == ir.OCALLPART {
-				// Redo the typechecking, now that we know the method
-				// value is being called.
-				call.X.(*ir.SelectorExpr).SetOp(ir.OXDOT)
-				call.X.SetTypecheck(0)
-				call.X.SetType(nil)
-				typecheck.Callee(call.X)
-				m.SetTypecheck(0)
-				typecheck.Call(m.(*ir.CallExpr))
+		if x.Typecheck() == 3 {
+			// These are nodes whose transforms were delayed until
+			// their instantiated type was known.
+			m.SetTypecheck(1)
+			if typecheck.IsCmp(x.Op()) {
+				transformCompare(m.(*ir.BinaryExpr))
 			} else {
-				base.FatalfAt(call.Pos(), "Expecting OCALLPART or OTYPE with CALL")
+				switch x.Op() {
+				case ir.OSLICE, ir.OSLICE3:
+					transformSlice(m.(*ir.SliceExpr))
+
+				case ir.OADD:
+					m = transformAdd(m.(*ir.BinaryExpr))
+
+				case ir.OINDEX:
+					transformIndex(m.(*ir.IndexExpr))
+
+				case ir.OAS2:
+					as2 := m.(*ir.AssignListStmt)
+					transformAssign(as2, as2.Lhs, as2.Rhs)
+
+				case ir.OAS:
+					as := m.(*ir.AssignStmt)
+					lhs, rhs := []ir.Node{as.X}, []ir.Node{as.Y}
+					transformAssign(as, lhs, rhs)
+
+				case ir.OASOP:
+					as := m.(*ir.AssignOpStmt)
+					transformCheckAssign(as, as.X)
+
+				default:
+					base.Fatalf("Unexpected node with Typecheck() == 3")
+				}
 			}
 		}
 
-		if x.Op() == ir.OCLOSURE {
+		switch x.Op() {
+		case ir.OLITERAL:
+			t := m.Type()
+			if t != x.Type() {
+				// types2 will give us a constant with a type T,
+				// if an untyped constant is used with another
+				// operand of type T (in a provably correct way).
+				// When we substitute in the type args during
+				// stenciling, we now know the real type of the
+				// constant. We may then need to change the
+				// BasicLit.val to be the correct type (e.g.
+				// convert an int64Val constant to a floatVal
+				// constant).
+				m.SetType(types.UntypedInt) // use any untyped type for DefaultLit to work
+				m = typecheck.DefaultLit(m, t)
+			}
+
+		case ir.OXDOT:
+			// A method value/call via a type param will have been
+			// left as an OXDOT. When we see this during stenciling,
+			// finish the transformation, now that we have the
+			// instantiated receiver type. We need to do this now,
+			// since the access/selection to the method for the real
+			// type is very different from the selection for the type
+			// param. m will be transformed to an OCALLPART node. It
+			// will be transformed to an ODOTMETH or ODOTINTER node if
+			// we find in the OCALL case below that the method value
+			// is actually called.
+			transformDot(m.(*ir.SelectorExpr), false)
+			m.SetTypecheck(1)
+
+		case ir.OCALL:
+			call := m.(*ir.CallExpr)
+			if call.X.Op() == ir.OTYPE {
+				// Transform the conversion, now that we know the
+				// type argument.
+				m = transformConvCall(m.(*ir.CallExpr))
+			} else if call.X.Op() == ir.OCALLPART {
+				// Redo the transformation of OXDOT, now that we
+				// know the method value is being called. Then
+				// transform the call.
+				call.X.(*ir.SelectorExpr).SetOp(ir.OXDOT)
+				transformDot(call.X.(*ir.SelectorExpr), true)
+				transformCall(call)
+			} else if call.X.Op() == ir.ODOT || call.X.Op() == ir.ODOTPTR {
+				// An OXDOT for a generic receiver was resolved to
+				// an access to a field which has a function
+				// value. Transform the call to that function, now
+				// that the OXDOT was resolved.
+				transformCall(call)
+			} else if name := call.X.Name(); name != nil {
+				switch name.BuiltinOp {
+				case ir.OMAKE, ir.OREAL, ir.OIMAG, ir.OLEN, ir.OCAP, ir.OAPPEND:
+					// Transform these builtins now that we
+					// know the type of the args.
+					m = transformBuiltin(call)
+				default:
+					base.FatalfAt(call.Pos(), "Unexpected builtin op")
+				}
+
+			} else if call.X.Op() != ir.OFUNCINST {
+				// A call with an OFUNCINST will get typechecked
+				// in stencil() once we have created & attached the
+				// instantiation to be called.
+				base.FatalfAt(call.Pos(), "Expecting OCALLPART or OTYPE or OFUNCINST or builtin with CALL")
+			}
+
+		case ir.OCLOSURE:
 			x := x.(*ir.ClosureExpr)
 			// Need to save/duplicate x.Func.Nname,
 			// x.Func.Nname.Ntype, x.Func.Dcl, x.Func.ClosureVars, and
@@ -420,6 +500,7 @@ func (subst *subster) node(n ir.Node) ir.Node {
 			// Set Ntype for now to be compatible with later parts of compiler
 			newfn.Nname.Ntype = subst.node(oldfn.Nname.Ntype).(ir.Ntype)
 			typed(subst.typ(oldfn.Nname.Type()), newfn.Nname)
+			typed(newfn.Nname.Type(), m)
 			newfn.SetTypecheck(1)
 			subst.g.target.Decls = append(subst.g.target.Decls, newfn)
 		}
@@ -452,9 +533,11 @@ func (subst *subster) list(l []ir.Node) []ir.Node {
 }
 
 // tstruct substitutes type params in types of the fields of a structure type. For
-// each field, if Nname is set, tstruct also translates the Nname using subst.vars, if
-// Nname is in subst.vars.
-func (subst *subster) tstruct(t *types.Type) *types.Type {
+// each field, if Nname is set, tstruct also translates the Nname using
+// subst.vars, if Nname is in subst.vars. To always force the creation of a new
+// (top-level) struct, regardless of whether anything changed with the types or
+// names of the struct's fields, set force to true.
+func (subst *subster) tstruct(t *types.Type, force bool) *types.Type {
 	if t.NumFields() == 0 {
 		if t.HasTParam() {
 			// For an empty struct, we need to return a new type,
@@ -465,6 +548,9 @@ func (subst *subster) tstruct(t *types.Type) *types.Type {
 		return t
 	}
 	var newfields []*types.Field
+	if force {
+		newfields = make([]*types.Field, t.NumFields())
+	}
 	for i, f := range t.Fields().Slice() {
 		t2 := subst.typ(f.Type)
 		if (t2 != f.Type || f.Nname != nil) && newfields == nil {
@@ -641,19 +727,32 @@ func (subst *subster) typ(t *types.Type) *types.Type {
 		}
 
 	case types.TSTRUCT:
-		newt = subst.tstruct(t)
+		newt = subst.tstruct(t, false)
 		if newt == t {
 			newt = nil
 		}
 
 	case types.TFUNC:
-		newrecvs := subst.tstruct(t.Recvs())
-		newparams := subst.tstruct(t.Params())
-		newresults := subst.tstruct(t.Results())
+		newrecvs := subst.tstruct(t.Recvs(), false)
+		newparams := subst.tstruct(t.Params(), false)
+		newresults := subst.tstruct(t.Results(), false)
 		if newrecvs != t.Recvs() || newparams != t.Params() || newresults != t.Results() {
+			// If any types have changed, then the all the fields of
+			// of recv, params, and results must be copied, because they have
+			// offset fields that are dependent, and so must have an
+			// independent copy for each new signature.
 			var newrecv *types.Field
 			if newrecvs.NumFields() > 0 {
+				if newrecvs == t.Recvs() {
+					newrecvs = subst.tstruct(t.Recvs(), true)
+				}
 				newrecv = newrecvs.Field(0)
+			}
+			if newparams == t.Params() {
+				newparams = subst.tstruct(t.Params(), true)
+			}
+			if newresults == t.Results() {
+				newresults = subst.tstruct(t.Results(), true)
 			}
 			newt = types.NewSignature(t.Pkg(), newrecv, t.TParams().FieldSlice(), newparams.FieldSlice(), newresults.FieldSlice())
 		}
@@ -664,8 +763,24 @@ func (subst *subster) typ(t *types.Type) *types.Type {
 			newt = nil
 		}
 
-		// TODO: case TCHAN
-		// TODO: case TMAP
+	case types.TMAP:
+		newkey := subst.typ(t.Key())
+		newval := subst.typ(t.Elem())
+		if newkey != t.Key() || newval != t.Elem() {
+			newt = types.NewMap(newkey, newval)
+		}
+
+	case types.TCHAN:
+		elem := t.Elem()
+		newelem := subst.typ(elem)
+		if newelem != elem {
+			newt = types.NewChan(newelem, t.ChanDir())
+			if !newt.HasTParam() {
+				// TODO(danscales): not sure why I have to do this
+				// only for channels.....
+				types.CheckSize(newt)
+			}
+		}
 	}
 	if newt == nil {
 		// Even though there were typeparams in the type, there may be no

@@ -56,6 +56,7 @@ func defaultAllCodeGen() bool {
 
 var (
 	goos, goarch string
+	cgoEnabled   bool
 
 	// dirs are the directories to look for *.go files in.
 	// TODO(bradfitz): just use all directories?
@@ -82,6 +83,10 @@ func main() {
 
 	goos = getenv("GOOS", runtime.GOOS)
 	goarch = getenv("GOARCH", runtime.GOARCH)
+	cgoEnv, err := exec.Command(goTool(), "env", "CGO_ENABLED").Output()
+	if err == nil {
+		cgoEnabled, _ = strconv.ParseBool(strings.TrimSpace(string(cgoEnv)))
+	}
 
 	findExecCmd()
 
@@ -367,9 +372,10 @@ func goDirPackages(longdir string, singlefilepkgs bool) ([][]string, error) {
 }
 
 type context struct {
-	GOOS     string
-	GOARCH   string
-	noOptEnv bool
+	GOOS       string
+	GOARCH     string
+	cgoEnabled bool
+	noOptEnv   bool
 }
 
 // shouldTest looks for build tags in a source file and returns
@@ -391,9 +397,10 @@ func shouldTest(src string, goos, goarch string) (ok bool, whyNot string) {
 		}
 		gcFlags := os.Getenv("GO_GCFLAGS")
 		ctxt := &context{
-			GOOS:     goos,
-			GOARCH:   goarch,
-			noOptEnv: strings.Contains(gcFlags, "-N") || strings.Contains(gcFlags, "-l"),
+			GOOS:       goos,
+			GOARCH:     goarch,
+			cgoEnabled: cgoEnabled,
+			noOptEnv:   strings.Contains(gcFlags, "-N") || strings.Contains(gcFlags, "-l"),
 		}
 
 		words := strings.Fields(line)
@@ -436,6 +443,20 @@ func (ctxt *context) match(name string) bool {
 		if !unicode.IsLetter(c) && !unicode.IsDigit(c) && c != '_' && c != '.' {
 			return false
 		}
+	}
+
+	exp := os.Getenv("GOEXPERIMENT")
+	if exp != "" {
+		experiments := strings.Split(exp, ",")
+		for _, e := range experiments {
+			if name == "goexperiment."+e {
+				return true
+			}
+		}
+	}
+
+	if name == "cgo" && ctxt.cgoEnabled {
+		return true
 	}
 
 	if name == ctxt.GOOS || name == ctxt.GOARCH || name == "gc" {
@@ -513,7 +534,7 @@ func (t *test) run() {
 		return
 	}
 
-	var args, flags []string
+	var args, flags, runenv []string
 	var tim int
 	wantError := false
 	wantAuto := false
@@ -572,6 +593,9 @@ func (t *test) run() {
 			if err != nil {
 				t.err = fmt.Errorf("need number of seconds for -t timeout, got %s instead", args[0])
 			}
+		case "-goexperiment": // set GOEXPERIMENT environment
+			args = args[1:]
+			runenv = append(runenv, "GOEXPERIMENT="+args[0])
 
 		default:
 			flags = append(flags, args[0])
@@ -628,6 +652,7 @@ func (t *test) run() {
 		if tempDirIsGOPATH {
 			cmd.Env = append(cmd.Env, "GOPATH="+t.tempDir)
 		}
+		cmd.Env = append(cmd.Env, runenv...)
 
 		var err error
 
@@ -1935,7 +1960,6 @@ var excluded = map[string]bool{
 	"writebarrier.go": true, // correct diagnostics, but different lines (probably irgen's fault)
 
 	"fixedbugs/bug176.go":    true, // types2 reports all errors (pref: types2)
-	"fixedbugs/bug193.go":    true, // types2 bug: shift error not reported (fixed in go/types)
 	"fixedbugs/bug195.go":    true, // types2 reports slightly different (but correct) bugs
 	"fixedbugs/bug228.go":    true, // types2 not run after syntax errors
 	"fixedbugs/bug231.go":    true, // types2 bug? (same error reported twice)

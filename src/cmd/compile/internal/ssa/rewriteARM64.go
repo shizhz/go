@@ -69,6 +69,14 @@ func rewriteValueARM64(v *Value) bool {
 		return rewriteValueARM64_OpARM64CSEL(v)
 	case OpARM64CSEL0:
 		return rewriteValueARM64_OpARM64CSEL0(v)
+	case OpARM64CSETM:
+		return rewriteValueARM64_OpARM64CSETM(v)
+	case OpARM64CSINC:
+		return rewriteValueARM64_OpARM64CSINC(v)
+	case OpARM64CSINV:
+		return rewriteValueARM64_OpARM64CSINV(v)
+	case OpARM64CSNEG:
+		return rewriteValueARM64_OpARM64CSNEG(v)
 	case OpARM64DIV:
 		return rewriteValueARM64_OpARM64DIV(v)
 	case OpARM64DIVW:
@@ -1764,6 +1772,81 @@ func rewriteValueARM64_OpARM64ADDshiftLL(v *Value) bool {
 		v.AddArg(x)
 		return true
 	}
+	// match: (ADDshiftLL [8] (UBFX [armBFAuxInt(8, 24)] (ANDconst [c1] x)) (ANDconst [c2] x))
+	// cond: uint32(c1) == 0xff00ff00 && uint32(c2) == 0x00ff00ff
+	// result: (REV16W x)
+	for {
+		if auxIntToInt64(v.AuxInt) != 8 || v_0.Op != OpARM64UBFX || auxIntToArm64BitField(v_0.AuxInt) != armBFAuxInt(8, 24) {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpARM64ANDconst {
+			break
+		}
+		c1 := auxIntToInt64(v_0_0.AuxInt)
+		x := v_0_0.Args[0]
+		if v_1.Op != OpARM64ANDconst {
+			break
+		}
+		c2 := auxIntToInt64(v_1.AuxInt)
+		if x != v_1.Args[0] || !(uint32(c1) == 0xff00ff00 && uint32(c2) == 0x00ff00ff) {
+			break
+		}
+		v.reset(OpARM64REV16W)
+		v.AddArg(x)
+		return true
+	}
+	// match: (ADDshiftLL [8] (SRLconst [8] (ANDconst [c1] x)) (ANDconst [c2] x))
+	// cond: (uint64(c1) == 0xff00ff00ff00ff00 && uint64(c2) == 0x00ff00ff00ff00ff)
+	// result: (REV16 x)
+	for {
+		if auxIntToInt64(v.AuxInt) != 8 || v_0.Op != OpARM64SRLconst || auxIntToInt64(v_0.AuxInt) != 8 {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpARM64ANDconst {
+			break
+		}
+		c1 := auxIntToInt64(v_0_0.AuxInt)
+		x := v_0_0.Args[0]
+		if v_1.Op != OpARM64ANDconst {
+			break
+		}
+		c2 := auxIntToInt64(v_1.AuxInt)
+		if x != v_1.Args[0] || !(uint64(c1) == 0xff00ff00ff00ff00 && uint64(c2) == 0x00ff00ff00ff00ff) {
+			break
+		}
+		v.reset(OpARM64REV16)
+		v.AddArg(x)
+		return true
+	}
+	// match: (ADDshiftLL [8] (SRLconst [8] (ANDconst [c1] x)) (ANDconst [c2] x))
+	// cond: (uint64(c1) == 0xff00ff00 && uint64(c2) == 0x00ff00ff)
+	// result: (REV16 (ANDconst <x.Type> [0xffffffff] x))
+	for {
+		if auxIntToInt64(v.AuxInt) != 8 || v_0.Op != OpARM64SRLconst || auxIntToInt64(v_0.AuxInt) != 8 {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpARM64ANDconst {
+			break
+		}
+		c1 := auxIntToInt64(v_0_0.AuxInt)
+		x := v_0_0.Args[0]
+		if v_1.Op != OpARM64ANDconst {
+			break
+		}
+		c2 := auxIntToInt64(v_1.AuxInt)
+		if x != v_1.Args[0] || !(uint64(c1) == 0xff00ff00 && uint64(c2) == 0x00ff00ff) {
+			break
+		}
+		v.reset(OpARM64REV16)
+		v0 := b.NewValue0(v.Pos, OpARM64ANDconst, x.Type)
+		v0.AuxInt = int64ToAuxInt(0xffffffff)
+		v0.AddArg(x)
+		v.AddArg(v0)
+		return true
+	}
 	// match: (ADDshiftLL [c] (SRLconst x [64-c]) x2)
 	// result: (EXTRconst [64-c] x2 x)
 	for {
@@ -3215,6 +3298,32 @@ func rewriteValueARM64_OpARM64CSEL(v *Value) bool {
 	v_2 := v.Args[2]
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
+	// match: (CSEL [cc] (MOVDconst [-1]) (MOVDconst [0]) flag)
+	// result: (CSETM [cc] flag)
+	for {
+		cc := auxIntToOp(v.AuxInt)
+		if v_0.Op != OpARM64MOVDconst || auxIntToInt64(v_0.AuxInt) != -1 || v_1.Op != OpARM64MOVDconst || auxIntToInt64(v_1.AuxInt) != 0 {
+			break
+		}
+		flag := v_2
+		v.reset(OpARM64CSETM)
+		v.AuxInt = opToAuxInt(cc)
+		v.AddArg(flag)
+		return true
+	}
+	// match: (CSEL [cc] (MOVDconst [0]) (MOVDconst [-1]) flag)
+	// result: (CSETM [arm64Negate(cc)] flag)
+	for {
+		cc := auxIntToOp(v.AuxInt)
+		if v_0.Op != OpARM64MOVDconst || auxIntToInt64(v_0.AuxInt) != 0 || v_1.Op != OpARM64MOVDconst || auxIntToInt64(v_1.AuxInt) != -1 {
+			break
+		}
+		flag := v_2
+		v.reset(OpARM64CSETM)
+		v.AuxInt = opToAuxInt(arm64Negate(cc))
+		v.AddArg(flag)
+		return true
+	}
 	// match: (CSEL [cc] x (MOVDconst [0]) flag)
 	// result: (CSEL0 [cc] x flag)
 	for {
@@ -3241,6 +3350,96 @@ func rewriteValueARM64_OpARM64CSEL(v *Value) bool {
 		v.reset(OpARM64CSEL0)
 		v.AuxInt = opToAuxInt(arm64Negate(cc))
 		v.AddArg2(y, flag)
+		return true
+	}
+	// match: (CSEL [cc] x (ADDconst [1] a) flag)
+	// result: (CSINC [cc] x a flag)
+	for {
+		cc := auxIntToOp(v.AuxInt)
+		x := v_0
+		if v_1.Op != OpARM64ADDconst || auxIntToInt64(v_1.AuxInt) != 1 {
+			break
+		}
+		a := v_1.Args[0]
+		flag := v_2
+		v.reset(OpARM64CSINC)
+		v.AuxInt = opToAuxInt(cc)
+		v.AddArg3(x, a, flag)
+		return true
+	}
+	// match: (CSEL [cc] (ADDconst [1] a) x flag)
+	// result: (CSINC [arm64Negate(cc)] x a flag)
+	for {
+		cc := auxIntToOp(v.AuxInt)
+		if v_0.Op != OpARM64ADDconst || auxIntToInt64(v_0.AuxInt) != 1 {
+			break
+		}
+		a := v_0.Args[0]
+		x := v_1
+		flag := v_2
+		v.reset(OpARM64CSINC)
+		v.AuxInt = opToAuxInt(arm64Negate(cc))
+		v.AddArg3(x, a, flag)
+		return true
+	}
+	// match: (CSEL [cc] x (MVN a) flag)
+	// result: (CSINV [cc] x a flag)
+	for {
+		cc := auxIntToOp(v.AuxInt)
+		x := v_0
+		if v_1.Op != OpARM64MVN {
+			break
+		}
+		a := v_1.Args[0]
+		flag := v_2
+		v.reset(OpARM64CSINV)
+		v.AuxInt = opToAuxInt(cc)
+		v.AddArg3(x, a, flag)
+		return true
+	}
+	// match: (CSEL [cc] (MVN a) x flag)
+	// result: (CSINV [arm64Negate(cc)] x a flag)
+	for {
+		cc := auxIntToOp(v.AuxInt)
+		if v_0.Op != OpARM64MVN {
+			break
+		}
+		a := v_0.Args[0]
+		x := v_1
+		flag := v_2
+		v.reset(OpARM64CSINV)
+		v.AuxInt = opToAuxInt(arm64Negate(cc))
+		v.AddArg3(x, a, flag)
+		return true
+	}
+	// match: (CSEL [cc] x (NEG a) flag)
+	// result: (CSNEG [cc] x a flag)
+	for {
+		cc := auxIntToOp(v.AuxInt)
+		x := v_0
+		if v_1.Op != OpARM64NEG {
+			break
+		}
+		a := v_1.Args[0]
+		flag := v_2
+		v.reset(OpARM64CSNEG)
+		v.AuxInt = opToAuxInt(cc)
+		v.AddArg3(x, a, flag)
+		return true
+	}
+	// match: (CSEL [cc] (NEG a) x flag)
+	// result: (CSNEG [arm64Negate(cc)] x a flag)
+	for {
+		cc := auxIntToOp(v.AuxInt)
+		if v_0.Op != OpARM64NEG {
+			break
+		}
+		a := v_0.Args[0]
+		x := v_1
+		flag := v_2
+		v.reset(OpARM64CSNEG)
+		v.AuxInt = opToAuxInt(arm64Negate(cc))
+		v.AddArg3(x, a, flag)
 		return true
 	}
 	// match: (CSEL [cc] x y (InvertFlags cmp))
@@ -3401,6 +3600,86 @@ func rewriteValueARM64_OpARM64CSEL0(v *Value) bool {
 		v.reset(OpARM64CSEL0)
 		v.AuxInt = opToAuxInt(arm64Negate(boolval.Op))
 		v.AddArg2(x, flagArg(boolval))
+		return true
+	}
+	return false
+}
+func rewriteValueARM64_OpARM64CSETM(v *Value) bool {
+	v_0 := v.Args[0]
+	// match: (CSETM [cc] (InvertFlags cmp))
+	// result: (CSETM [arm64Invert(cc)] cmp)
+	for {
+		cc := auxIntToOp(v.AuxInt)
+		if v_0.Op != OpARM64InvertFlags {
+			break
+		}
+		cmp := v_0.Args[0]
+		v.reset(OpARM64CSETM)
+		v.AuxInt = opToAuxInt(arm64Invert(cc))
+		v.AddArg(cmp)
+		return true
+	}
+	return false
+}
+func rewriteValueARM64_OpARM64CSINC(v *Value) bool {
+	v_2 := v.Args[2]
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	// match: (CSINC [cc] x y (InvertFlags cmp))
+	// result: (CSINC [arm64Invert(cc)] x y cmp)
+	for {
+		cc := auxIntToOp(v.AuxInt)
+		x := v_0
+		y := v_1
+		if v_2.Op != OpARM64InvertFlags {
+			break
+		}
+		cmp := v_2.Args[0]
+		v.reset(OpARM64CSINC)
+		v.AuxInt = opToAuxInt(arm64Invert(cc))
+		v.AddArg3(x, y, cmp)
+		return true
+	}
+	return false
+}
+func rewriteValueARM64_OpARM64CSINV(v *Value) bool {
+	v_2 := v.Args[2]
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	// match: (CSINV [cc] x y (InvertFlags cmp))
+	// result: (CSINV [arm64Invert(cc)] x y cmp)
+	for {
+		cc := auxIntToOp(v.AuxInt)
+		x := v_0
+		y := v_1
+		if v_2.Op != OpARM64InvertFlags {
+			break
+		}
+		cmp := v_2.Args[0]
+		v.reset(OpARM64CSINV)
+		v.AuxInt = opToAuxInt(arm64Invert(cc))
+		v.AddArg3(x, y, cmp)
+		return true
+	}
+	return false
+}
+func rewriteValueARM64_OpARM64CSNEG(v *Value) bool {
+	v_2 := v.Args[2]
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	// match: (CSNEG [cc] x y (InvertFlags cmp))
+	// result: (CSNEG [arm64Invert(cc)] x y cmp)
+	for {
+		cc := auxIntToOp(v.AuxInt)
+		x := v_0
+		y := v_1
+		if v_2.Op != OpARM64InvertFlags {
+			break
+		}
+		cmp := v_2.Args[0]
+		v.reset(OpARM64CSNEG)
+		v.AuxInt = opToAuxInt(arm64Invert(cc))
+		v.AddArg3(x, y, cmp)
 		return true
 	}
 	return false
@@ -17646,6 +17925,81 @@ func rewriteValueARM64_OpARM64ORshiftLL(v *Value) bool {
 		v.AddArg(x)
 		return true
 	}
+	// match: (ORshiftLL [8] (UBFX [armBFAuxInt(8, 24)] (ANDconst [c1] x)) (ANDconst [c2] x))
+	// cond: uint32(c1) == 0xff00ff00 && uint32(c2) == 0x00ff00ff
+	// result: (REV16W x)
+	for {
+		if auxIntToInt64(v.AuxInt) != 8 || v_0.Op != OpARM64UBFX || auxIntToArm64BitField(v_0.AuxInt) != armBFAuxInt(8, 24) {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpARM64ANDconst {
+			break
+		}
+		c1 := auxIntToInt64(v_0_0.AuxInt)
+		x := v_0_0.Args[0]
+		if v_1.Op != OpARM64ANDconst {
+			break
+		}
+		c2 := auxIntToInt64(v_1.AuxInt)
+		if x != v_1.Args[0] || !(uint32(c1) == 0xff00ff00 && uint32(c2) == 0x00ff00ff) {
+			break
+		}
+		v.reset(OpARM64REV16W)
+		v.AddArg(x)
+		return true
+	}
+	// match: (ORshiftLL [8] (SRLconst [8] (ANDconst [c1] x)) (ANDconst [c2] x))
+	// cond: (uint64(c1) == 0xff00ff00ff00ff00 && uint64(c2) == 0x00ff00ff00ff00ff)
+	// result: (REV16 x)
+	for {
+		if auxIntToInt64(v.AuxInt) != 8 || v_0.Op != OpARM64SRLconst || auxIntToInt64(v_0.AuxInt) != 8 {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpARM64ANDconst {
+			break
+		}
+		c1 := auxIntToInt64(v_0_0.AuxInt)
+		x := v_0_0.Args[0]
+		if v_1.Op != OpARM64ANDconst {
+			break
+		}
+		c2 := auxIntToInt64(v_1.AuxInt)
+		if x != v_1.Args[0] || !(uint64(c1) == 0xff00ff00ff00ff00 && uint64(c2) == 0x00ff00ff00ff00ff) {
+			break
+		}
+		v.reset(OpARM64REV16)
+		v.AddArg(x)
+		return true
+	}
+	// match: (ORshiftLL [8] (SRLconst [8] (ANDconst [c1] x)) (ANDconst [c2] x))
+	// cond: (uint64(c1) == 0xff00ff00 && uint64(c2) == 0x00ff00ff)
+	// result: (REV16 (ANDconst <x.Type> [0xffffffff] x))
+	for {
+		if auxIntToInt64(v.AuxInt) != 8 || v_0.Op != OpARM64SRLconst || auxIntToInt64(v_0.AuxInt) != 8 {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpARM64ANDconst {
+			break
+		}
+		c1 := auxIntToInt64(v_0_0.AuxInt)
+		x := v_0_0.Args[0]
+		if v_1.Op != OpARM64ANDconst {
+			break
+		}
+		c2 := auxIntToInt64(v_1.AuxInt)
+		if x != v_1.Args[0] || !(uint64(c1) == 0xff00ff00 && uint64(c2) == 0x00ff00ff) {
+			break
+		}
+		v.reset(OpARM64REV16)
+		v0 := b.NewValue0(v.Pos, OpARM64ANDconst, x.Type)
+		v0.AuxInt = int64ToAuxInt(0xffffffff)
+		v0.AddArg(x)
+		v.AddArg(v0)
+		return true
+	}
 	// match: ( ORshiftLL [c] (SRLconst x [64-c]) x2)
 	// result: (EXTRconst [64-c] x2 x)
 	for {
@@ -21519,6 +21873,81 @@ func rewriteValueARM64_OpARM64XORshiftLL(v *Value) bool {
 		v.AddArg(x)
 		return true
 	}
+	// match: (XORshiftLL [8] (UBFX [armBFAuxInt(8, 24)] (ANDconst [c1] x)) (ANDconst [c2] x))
+	// cond: uint32(c1) == 0xff00ff00 && uint32(c2) == 0x00ff00ff
+	// result: (REV16W x)
+	for {
+		if auxIntToInt64(v.AuxInt) != 8 || v_0.Op != OpARM64UBFX || auxIntToArm64BitField(v_0.AuxInt) != armBFAuxInt(8, 24) {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpARM64ANDconst {
+			break
+		}
+		c1 := auxIntToInt64(v_0_0.AuxInt)
+		x := v_0_0.Args[0]
+		if v_1.Op != OpARM64ANDconst {
+			break
+		}
+		c2 := auxIntToInt64(v_1.AuxInt)
+		if x != v_1.Args[0] || !(uint32(c1) == 0xff00ff00 && uint32(c2) == 0x00ff00ff) {
+			break
+		}
+		v.reset(OpARM64REV16W)
+		v.AddArg(x)
+		return true
+	}
+	// match: (XORshiftLL [8] (SRLconst [8] (ANDconst [c1] x)) (ANDconst [c2] x))
+	// cond: (uint64(c1) == 0xff00ff00ff00ff00 && uint64(c2) == 0x00ff00ff00ff00ff)
+	// result: (REV16 x)
+	for {
+		if auxIntToInt64(v.AuxInt) != 8 || v_0.Op != OpARM64SRLconst || auxIntToInt64(v_0.AuxInt) != 8 {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpARM64ANDconst {
+			break
+		}
+		c1 := auxIntToInt64(v_0_0.AuxInt)
+		x := v_0_0.Args[0]
+		if v_1.Op != OpARM64ANDconst {
+			break
+		}
+		c2 := auxIntToInt64(v_1.AuxInt)
+		if x != v_1.Args[0] || !(uint64(c1) == 0xff00ff00ff00ff00 && uint64(c2) == 0x00ff00ff00ff00ff) {
+			break
+		}
+		v.reset(OpARM64REV16)
+		v.AddArg(x)
+		return true
+	}
+	// match: (XORshiftLL [8] (SRLconst [8] (ANDconst [c1] x)) (ANDconst [c2] x))
+	// cond: (uint64(c1) == 0xff00ff00 && uint64(c2) == 0x00ff00ff)
+	// result: (REV16 (ANDconst <x.Type> [0xffffffff] x))
+	for {
+		if auxIntToInt64(v.AuxInt) != 8 || v_0.Op != OpARM64SRLconst || auxIntToInt64(v_0.AuxInt) != 8 {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpARM64ANDconst {
+			break
+		}
+		c1 := auxIntToInt64(v_0_0.AuxInt)
+		x := v_0_0.Args[0]
+		if v_1.Op != OpARM64ANDconst {
+			break
+		}
+		c2 := auxIntToInt64(v_1.AuxInt)
+		if x != v_1.Args[0] || !(uint64(c1) == 0xff00ff00 && uint64(c2) == 0x00ff00ff) {
+			break
+		}
+		v.reset(OpARM64REV16)
+		v0 := b.NewValue0(v.Pos, OpARM64ANDconst, x.Type)
+		v0.AuxInt = int64ToAuxInt(0xffffffff)
+		v0.AddArg(x)
+		v.AddArg(v0)
+		return true
+	}
 	// match: (XORshiftLL [c] (SRLconst x [64-c]) x2)
 	// result: (EXTRconst [64-c] x2 x)
 	for {
@@ -22049,12 +22478,12 @@ func rewriteValueARM64_OpConst8(v *Value) bool {
 	}
 }
 func rewriteValueARM64_OpConstBool(v *Value) bool {
-	// match: (ConstBool [b])
-	// result: (MOVDconst [b2i(b)])
+	// match: (ConstBool [t])
+	// result: (MOVDconst [b2i(t)])
 	for {
-		b := auxIntToBool(v.AuxInt)
+		t := auxIntToBool(v.AuxInt)
 		v.reset(OpARM64MOVDconst)
-		v.AuxInt = int64ToAuxInt(b2i(b))
+		v.AuxInt = int64ToAuxInt(b2i(t))
 		return true
 	}
 }

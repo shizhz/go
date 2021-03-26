@@ -92,13 +92,6 @@ func (r *regInfo) String() string {
 
 type auxType int8
 
-type Param struct {
-	Type   *types.Type
-	Offset int32 // Offset of Param if not in a register, spill offset if it is in a register input, types.BADWIDTH if it is a register output.
-	Reg    []abi.RegIndex
-	Name   *ir.Name // For OwnAux, need to prepend stores with Vardefs
-}
-
 type AuxNameOffset struct {
 	Name   *ir.Name
 	Offset int64
@@ -110,12 +103,9 @@ func (a *AuxNameOffset) String() string {
 }
 
 type AuxCall struct {
-	// TODO(register args) this information is largely redundant with ../abi information, needs cleanup once new ABI is in place.
 	Fn      *obj.LSym
-	args    []Param // Includes receiver for method calls.  Does NOT include hidden closure pointer.
-	results []Param
-	reg     *regInfo                // regInfo for this call // TODO for now nil means ignore
-	abiInfo *abi.ABIParamResultInfo // TODO remove fields above redundant with this information.
+	reg     *regInfo // regInfo for this call
+	abiInfo *abi.ABIParamResultInfo
 }
 
 // Reg returns the regInfo for a given call, combining the derived in/out register masks
@@ -191,7 +181,17 @@ func archRegForAbiReg(r abi.RegIndex, c *Config) uint8 {
 	return uint8(m)
 }
 
-// OffsetOfResult returns the SP offset of result which (indexed 0, 1, etc).
+// ArgWidth returns the amount of stack needed for all the inputs
+// and outputs of a function or method, including ABI-defined parameter
+// slots and ABI-defined spill slots for register-resident parameters.
+//
+// The name is taken from the types package's ArgWidth(<function type>),
+// which predated changes to the ABI; this version handles those changes.
+func (a *AuxCall) ArgWidth() int64 {
+	return a.abiInfo.ArgWidth()
+}
+
+// ParamAssignmentForResult returns the ABI Parameter assignment for result which (indexed 0, 1, etc).
 func (a *AuxCall) ParamAssignmentForResult(which int64) *abi.ABIParamAssignment {
 	return a.abiInfo.OutParam(int(which))
 }
@@ -218,6 +218,15 @@ func (a *AuxCall) RegsOfResult(which int64) []abi.RegIndex {
 // If the call is to a method, the receiver is the first argument (i.e., index 0)
 func (a *AuxCall) RegsOfArg(which int64) []abi.RegIndex {
 	return a.abiInfo.InParam(int(which)).Registers
+}
+
+// NameOfResult returns the type of result which (indexed 0, 1, etc).
+func (a *AuxCall) NameOfResult(which int64) *ir.Name {
+	name := a.abiInfo.OutParam(int(which)).Name
+	if name == nil {
+		return nil
+	}
+	return name.(*ir.Name)
 }
 
 // TypeOfResult returns the type of result which (indexed 0, 1, etc).
@@ -263,10 +272,7 @@ func (a *AuxCall) NArgs() int64 {
 	return int64(len(a.abiInfo.InParams()))
 }
 
-// String returns
-// "AuxCall{<fn>(<args>)}"             if len(results) == 0;
-// "AuxCall{<fn>(<args>)<results[0]>}" if len(results) == 1;
-// "AuxCall{<fn>(<args>)(<results>)}"  otherwise.
+// String returns "AuxCall{<fn>}"
 func (a *AuxCall) String() string {
 	var fn string
 	if a.Fn == nil {
@@ -274,46 +280,13 @@ func (a *AuxCall) String() string {
 	} else {
 		fn = fmt.Sprintf("AuxCall{%v", a.Fn)
 	}
-
-	if len(a.args) == 0 {
-		fn += "()"
-	} else {
-		s := "("
-		for _, arg := range a.args {
-			fn += fmt.Sprintf("%s[%v,%v]", s, arg.Type, arg.Offset)
-			s = ","
-		}
-		fn += ")"
-	}
-
-	if len(a.results) > 0 { // usual is zero or one; only some RT calls have more than one.
-		if len(a.results) == 1 {
-			fn += fmt.Sprintf("[%v,%v]", a.results[0].Type, a.results[0].Offset)
-		} else {
-			s := "("
-			for _, result := range a.results {
-				fn += fmt.Sprintf("%s[%v,%v]", s, result.Type, result.Offset)
-				s = ","
-			}
-			fn += ")"
-		}
-	}
+	// TODO how much of the ABI should be printed?
 
 	return fn + "}"
 }
 
-// ACParamsToTypes translates a slice of Param into a slice of *types.Type
-// This is a helper call for ssagen/ssa.go.
-// TODO remove this, as part of replacing fields of AuxCall with abi.ABIParamResultInfo.
-func ACParamsToTypes(ps []Param) (ts []*types.Type) {
-	for _, p := range ps {
-		ts = append(ts, p.Type)
-	}
-	return
-}
-
 // StaticAuxCall returns an AuxCall for a static call.
-func StaticAuxCall(sym *obj.LSym, args []Param, results []Param, paramResultInfo *abi.ABIParamResultInfo) *AuxCall {
+func StaticAuxCall(sym *obj.LSym, paramResultInfo *abi.ABIParamResultInfo) *AuxCall {
 	if paramResultInfo == nil {
 		panic(fmt.Errorf("Nil paramResultInfo, sym=%v", sym))
 	}
@@ -321,37 +294,37 @@ func StaticAuxCall(sym *obj.LSym, args []Param, results []Param, paramResultInfo
 	if paramResultInfo.InRegistersUsed()+paramResultInfo.OutRegistersUsed() > 0 {
 		reg = &regInfo{}
 	}
-	return &AuxCall{Fn: sym, args: args, results: results, abiInfo: paramResultInfo, reg: reg}
+	return &AuxCall{Fn: sym, abiInfo: paramResultInfo, reg: reg}
 }
 
 // InterfaceAuxCall returns an AuxCall for an interface call.
-func InterfaceAuxCall(args []Param, results []Param, paramResultInfo *abi.ABIParamResultInfo) *AuxCall {
+func InterfaceAuxCall(paramResultInfo *abi.ABIParamResultInfo) *AuxCall {
 	var reg *regInfo
 	if paramResultInfo.InRegistersUsed()+paramResultInfo.OutRegistersUsed() > 0 {
 		reg = &regInfo{}
 	}
-	return &AuxCall{Fn: nil, args: args, results: results, abiInfo: paramResultInfo, reg: reg}
+	return &AuxCall{Fn: nil, abiInfo: paramResultInfo, reg: reg}
 }
 
 // ClosureAuxCall returns an AuxCall for a closure call.
-func ClosureAuxCall(args []Param, results []Param, paramResultInfo *abi.ABIParamResultInfo) *AuxCall {
+func ClosureAuxCall(paramResultInfo *abi.ABIParamResultInfo) *AuxCall {
 	var reg *regInfo
 	if paramResultInfo.InRegistersUsed()+paramResultInfo.OutRegistersUsed() > 0 {
 		reg = &regInfo{}
 	}
-	return &AuxCall{Fn: nil, args: args, results: results, abiInfo: paramResultInfo, reg: reg}
+	return &AuxCall{Fn: nil, abiInfo: paramResultInfo, reg: reg}
 }
 
 func (*AuxCall) CanBeAnSSAAux() {}
 
 // OwnAuxCall returns a function's own AuxCall
-func OwnAuxCall(fn *obj.LSym, args []Param, results []Param, paramResultInfo *abi.ABIParamResultInfo) *AuxCall {
+func OwnAuxCall(fn *obj.LSym, paramResultInfo *abi.ABIParamResultInfo) *AuxCall {
 	// TODO if this remains identical to ClosureAuxCall above after new ABI is done, should deduplicate.
 	var reg *regInfo
 	if paramResultInfo.InRegistersUsed()+paramResultInfo.OutRegistersUsed() > 0 {
 		reg = &regInfo{}
 	}
-	return &AuxCall{Fn: fn, args: args, results: results, abiInfo: paramResultInfo, reg: reg}
+	return &AuxCall{Fn: fn, abiInfo: paramResultInfo, reg: reg}
 }
 
 const (

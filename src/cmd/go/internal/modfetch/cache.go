@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -21,7 +23,7 @@ import (
 	"cmd/go/internal/lockedfile"
 	"cmd/go/internal/modfetch/codehost"
 	"cmd/go/internal/par"
-	"cmd/go/internal/renameio"
+	"cmd/go/internal/robustio"
 
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
@@ -495,7 +497,7 @@ func readDiskStatByHash(path, rev string) (file string, info *RevInfo, err error
 	for _, name := range names {
 		if strings.HasSuffix(name, suffix) {
 			v := strings.TrimSuffix(name, ".info")
-			if IsPseudoVersion(v) && semver.Compare(v, maxVersion) > 0 {
+			if module.IsPseudoVersion(v) && semver.Compare(v, maxVersion) > 0 {
 				maxVersion = v
 				file, info, err = readDiskStat(path, strings.TrimSuffix(name, ".info"))
 			}
@@ -543,7 +545,7 @@ func readDiskCache(path, rev, suffix string) (file string, data []byte, err erro
 	if err != nil {
 		return "", nil, errNotCached
 	}
-	data, err = renameio.ReadFile(file)
+	data, err = robustio.ReadFile(file)
 	if err != nil {
 		return file, nil, errNotCached
 	}
@@ -580,7 +582,29 @@ func writeDiskCache(file string, data []byte) error {
 		return err
 	}
 
-	if err := renameio.WriteFile(file, data, 0666); err != nil {
+	// Write the file to a temporary location, and then rename it to its final
+	// path to reduce the likelihood of a corrupt file existing at that final path.
+	f, err := tempFile(filepath.Dir(file), filepath.Base(file), 0666)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Only call os.Remove on f.Name() if we failed to rename it: otherwise,
+		// some other process may have created a new file with the same name after
+		// the rename completed.
+		if err != nil {
+			f.Close()
+			os.Remove(f.Name())
+		}
+	}()
+
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := robustio.Rename(f.Name(), file); err != nil {
 		return err
 	}
 
@@ -588,6 +612,19 @@ func writeDiskCache(file string, data []byte) error {
 		rewriteVersionList(filepath.Dir(file))
 	}
 	return nil
+}
+
+// tempFile creates a new temporary file with given permission bits.
+func tempFile(dir, prefix string, perm fs.FileMode) (f *os.File, err error) {
+	for i := 0; i < 10000; i++ {
+		name := filepath.Join(dir, prefix+strconv.Itoa(rand.Intn(1000000000))+".tmp")
+		f, err = os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, perm)
+		if os.IsExist(err) {
+			continue
+		}
+		break
+	}
+	return
 }
 
 // rewriteVersionList rewrites the version list in dir
@@ -637,7 +674,7 @@ func rewriteVersionList(dir string) (err error) {
 			}
 		}
 	}
-	SortVersions(list)
+	semver.Sort(list)
 
 	var buf bytes.Buffer
 	for _, v := range list {

@@ -287,8 +287,6 @@ func runGet(ctx context.Context, cmd *base.Command, args []string) {
 	// 'go get' is expected to do this, unlike other commands.
 	modload.AllowMissingModuleImports()
 
-	modload.LoadModFile(ctx) // Initializes modload.Target.
-
 	queries := parseArgs(ctx, args)
 
 	r := newResolver(ctx, queries)
@@ -369,7 +367,23 @@ func runGet(ctx context.Context, cmd *base.Command, args []string) {
 	// directory.
 	if !*getD && len(pkgPatterns) > 0 {
 		work.BuildInit()
-		pkgs := load.PackagesAndErrors(ctx, pkgPatterns)
+
+		var pkgs []*load.Package
+		for _, pkg := range load.PackagesAndErrors(ctx, pkgPatterns) {
+			if pkg.Error != nil {
+				var noGo *load.NoGoError
+				if errors.As(pkg.Error.Err, &noGo) {
+					if m := modload.PackageModule(pkg.ImportPath); m.Path == pkg.ImportPath {
+						// pkg is at the root of a module, and doesn't exist with the current
+						// build tags. Probably the user just wanted to change the version of
+						// that module — not also build the package — so suppress the error.
+						// (See https://golang.org/issue/33526.)
+						continue
+					}
+				}
+			}
+			pkgs = append(pkgs, pkg)
+		}
 		load.CheckPackageErrors(pkgs)
 		work.InstallPackages(ctx, pkgPatterns, pkgs)
 		// TODO(#40276): After Go 1.16, print a deprecation notice when building and
@@ -385,7 +399,7 @@ func runGet(ctx context.Context, cmd *base.Command, args []string) {
 	oldReqs := reqsFromGoMod(modload.ModFile())
 
 	modload.AllowWriteGoMod()
-	modload.WriteGoMod()
+	modload.WriteGoMod(ctx)
 	modload.DisallowWriteGoMod()
 
 	newReqs := reqsFromGoMod(modload.ModFile())
@@ -467,7 +481,11 @@ type versionReason struct {
 }
 
 func newResolver(ctx context.Context, queries []*query) *resolver {
-	buildList := modload.LoadAllModules(ctx)
+	// LoadModGraph also sets modload.Target, which is needed by various resolver
+	// methods.
+	mg := modload.LoadModGraph(ctx)
+
+	buildList := mg.BuildList()
 	initialVersion := make(map[string]string, len(buildList))
 	for _, m := range buildList {
 		initialVersion[m.Path] = m.Version
@@ -676,7 +694,7 @@ func (r *resolver) performLocalQueries(ctx context.Context) {
 
 			// Absolute paths like C:\foo and relative paths like ../foo... are
 			// restricted to matching packages in the main module.
-			pkgPattern := modload.DirImportPath(q.pattern)
+			pkgPattern := modload.DirImportPath(ctx, q.pattern)
 			if pkgPattern == "." {
 				return errSet(fmt.Errorf("%s%s is not within module rooted at %s", q.pattern, absDetail, modload.ModRoot()))
 			}
@@ -1453,6 +1471,7 @@ func (r *resolver) checkPackagesAndRetractions(ctx context.Context, pkgPatterns 
 			LoadTests:                *getT,
 			ResolveMissingImports:    false,
 			AllowErrors:              true,
+			SilenceNoGoErrors:        true,
 		}
 		matches, pkgs := modload.LoadPackages(ctx, pkgOpts, pkgPatterns...)
 		for _, m := range matches {
@@ -1468,9 +1487,9 @@ func (r *resolver) checkPackagesAndRetractions(ctx context.Context, pkgPatterns 
 					// associated with either the package or its test — ErrNoGo must
 					// indicate that none of those source files happen to apply in this
 					// configuration. If we are actually building the package (no -d
-					// flag), the compiler will report the problem; otherwise, assume that
-					// the user is going to build or test it in some other configuration
-					// and suppress the error.
+					// flag), we will report the problem then; otherwise, assume that the
+					// user is going to build or test this package in some other
+					// configuration and suppress the error.
 					continue
 				}
 
@@ -1658,7 +1677,7 @@ func (r *resolver) updateBuildList(ctx context.Context, additions []module.Versi
 		return false
 	}
 
-	r.buildList = modload.LoadAllModules(ctx)
+	r.buildList = modload.LoadModGraph(ctx).BuildList()
 	r.buildListVersion = make(map[string]string, len(r.buildList))
 	for _, m := range r.buildList {
 		r.buildListVersion[m.Path] = m.Version

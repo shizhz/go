@@ -32,7 +32,7 @@ type deadcodePass struct {
 func (d *deadcodePass) init() {
 	d.ldr.InitReachable()
 	d.ifaceMethod = make(map[methodsig]bool)
-	if objabi.Fieldtrack_enabled != 0 {
+	if objabi.Experiment.FieldTrack {
 		d.ldr.Reachparent = make([]loader.Sym, d.ldr.NSym())
 	}
 	d.dynlink = d.ctxt.DynlinkingGo()
@@ -64,6 +64,9 @@ func (d *deadcodePass) init() {
 			}
 		}
 		names = append(names, *flagEntrySymbol)
+		// runtime.unreachableMethod is a function that will throw if called.
+		// We redirect unreachable methods to it.
+		names = append(names, "runtime.unreachableMethod")
 		if !d.ctxt.linkShared && d.ctxt.BuildMode != BuildModePlugin {
 			// runtime.buildVersion and runtime.modinfo are referenced in .go.buildinfo section
 			// (see function buildinfo in data.go). They should normally be reachable from the
@@ -118,7 +121,7 @@ func (d *deadcodePass) flood() {
 
 		if isgotype {
 			if d.dynlink {
-				// When dynaamic linking, a type may be passed across DSO
+				// When dynamic linking, a type may be passed across DSO
 				// boundary and get converted to interface at the other side.
 				d.ldr.SetAttrUsedInIface(symIdx, true)
 			}
@@ -255,7 +258,7 @@ func (d *deadcodePass) mark(symIdx, parent loader.Sym) {
 	if symIdx != 0 && !d.ldr.AttrReachable(symIdx) {
 		d.wq.push(symIdx)
 		d.ldr.SetAttrReachable(symIdx, true)
-		if objabi.Fieldtrack_enabled != 0 && d.ldr.Reachparent[symIdx] == 0 {
+		if objabi.Experiment.FieldTrack && d.ldr.Reachparent[symIdx] == 0 {
 			d.ldr.Reachparent[symIdx] = parent
 		}
 		if *flagDumpDep {

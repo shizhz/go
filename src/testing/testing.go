@@ -190,7 +190,7 @@
 //         }
 //     }
 //
-// The race detector kills the program if it exceeds 8192 concurrent goroutines,
+// The race detector kills the program if it exceeds 8128 concurrent goroutines,
 // so use care when running parallel tests with the -race flag set.
 //
 // Run does not return until parallel subtests have completed, providing a way
@@ -509,6 +509,13 @@ func (c *common) frameSkip(skip int) runtime.Frame {
 			}
 			return prevFrame
 		}
+		// If more helper PCs have been added since we last did the conversion
+		if c.helperNames == nil {
+			c.helperNames = make(map[string]struct{})
+			for pc := range c.helperPCs {
+				c.helperNames[pcToName(pc)] = struct{}{}
+			}
+		}
 		if _, ok := c.helperNames[frame.Function]; !ok {
 			// Found a frame that wasn't inside a helper function.
 			return frame
@@ -521,14 +528,6 @@ func (c *common) frameSkip(skip int) runtime.Frame {
 // and inserts the final newline if needed and indentation spaces for formatting.
 // This function must be called with c.mu held.
 func (c *common) decorate(s string, skip int) string {
-	// If more helper PCs have been added since we last did the conversion
-	if c.helperNames == nil {
-		c.helperNames = make(map[string]struct{})
-		for pc := range c.helperPCs {
-			c.helperNames[pcToName(pc)] = struct{}{}
-		}
-	}
-
 	frame := c.frameSkip(skip)
 	file := frame.File
 	line := frame.Line
@@ -1259,7 +1258,7 @@ func (t *T) Run(name string, f func(t *T)) bool {
 	t = &T{
 		common: common{
 			barrier: make(chan bool),
-			signal:  make(chan bool),
+			signal:  make(chan bool, 1),
 			name:    testName,
 			parent:  &t.common,
 			level:   t.level + 1,
@@ -1540,7 +1539,7 @@ func runTests(matchString func(pat, str string) (bool, error), tests []InternalT
 			ctx.deadline = deadline
 			t := &T{
 				common: common{
-					signal:  make(chan bool),
+					signal:  make(chan bool, 1),
 					barrier: make(chan bool),
 					w:       os.Stdout,
 				},
@@ -1553,11 +1552,12 @@ func runTests(matchString func(pat, str string) (bool, error), tests []InternalT
 				for _, test := range tests {
 					t.Run(test.Name, test.F)
 				}
-				// Run catching the signal rather than the tRunner as a separate
-				// goroutine to avoid adding a goroutine during the sequential
-				// phase as this pollutes the stacktrace output when aborting.
-				go func() { <-t.signal }()
 			})
+			select {
+			case <-t.signal:
+			default:
+				panic("internal error: tRunner exited without sending on t.signal")
+			}
 			ok = ok && !t.Failed()
 			ran = ran || t.ran
 		}

@@ -104,7 +104,9 @@ func (s *ssafn) AllocFrame(f *ssa.Func) {
 	// Reassign stack offsets of the locals that are used.
 	lastHasPtr := false
 	for i, n := range fn.Dcl {
-		if n.Op() != ir.ONAME || n.Class != ir.PAUTO {
+		if n.Op() != ir.ONAME || n.Class != ir.PAUTO && !(n.Class == ir.PPARAMOUT && n.IsOutputParamInRegisters()) {
+			// i.e., stack assign if AUTO, or if PARAMOUT in registers (which has no predefined spill locations)
+			// TODO figure out when we don't need to spill output params.
 			continue
 		}
 		if !n.Used() {
@@ -148,9 +150,9 @@ const maxStackSize = 1 << 30
 func Compile(fn *ir.Func, worker int) {
 	f := buildssa(fn, worker)
 	// Note: check arg size to fix issue 25507.
-	if f.Frontend().(*ssafn).stksize >= maxStackSize || fn.Type().ArgWidth() >= maxStackSize {
+	if f.Frontend().(*ssafn).stksize >= maxStackSize || f.OwnAux.ArgWidth() >= maxStackSize {
 		largeStackFramesMu.Lock()
-		largeStackFrames = append(largeStackFrames, largeStack{locals: f.Frontend().(*ssafn).stksize, args: fn.Type().ArgWidth(), pos: fn.Pos()})
+		largeStackFrames = append(largeStackFrames, largeStack{locals: f.Frontend().(*ssafn).stksize, args: f.OwnAux.ArgWidth(), pos: fn.Pos()})
 		largeStackFramesMu.Unlock()
 		return
 	}
@@ -166,7 +168,7 @@ func Compile(fn *ir.Func, worker int) {
 	if pp.Text.To.Offset >= maxStackSize {
 		largeStackFramesMu.Lock()
 		locals := f.Frontend().(*ssafn).stksize
-		largeStackFrames = append(largeStackFrames, largeStack{locals: locals, args: fn.Type().ArgWidth(), callee: pp.Text.To.Offset - locals, pos: fn.Pos()})
+		largeStackFrames = append(largeStackFrames, largeStack{locals: locals, args: f.OwnAux.ArgWidth(), callee: pp.Text.To.Offset - locals, pos: fn.Pos()})
 		largeStackFramesMu.Unlock()
 		return
 	}
@@ -189,16 +191,20 @@ func StackOffset(slot ssa.LocalSlot) int32 {
 	n := slot.N
 	var off int64
 	switch n.Class {
+	case ir.PPARAM, ir.PPARAMOUT:
+		if !n.IsOutputParamInRegisters() {
+			off = n.FrameOffset() + base.Ctxt.FixedFrameSize()
+			break
+		}
+		fallthrough // PPARAMOUT in registers allocates like an AUTO
 	case ir.PAUTO:
 		off = n.FrameOffset()
 		if base.Ctxt.FixedFrameSize() == 0 {
 			off -= int64(types.PtrSize)
 		}
-		if objabi.Framepointer_enabled {
+		if objabi.FramePointerEnabled {
 			off -= int64(types.PtrSize)
 		}
-	case ir.PPARAM, ir.PPARAMOUT:
-		off = n.FrameOffset() + base.Ctxt.FixedFrameSize()
 	}
 	return int32(off + slot.Off)
 }
@@ -209,7 +215,7 @@ func fieldtrack(fnsym *obj.LSym, tracked map[*obj.LSym]struct{}) {
 	if fnsym == nil {
 		return
 	}
-	if objabi.Fieldtrack_enabled == 0 || len(tracked) == 0 {
+	if !objabi.Experiment.FieldTrack || len(tracked) == 0 {
 		return
 	}
 

@@ -68,8 +68,15 @@ func instTypeName2(name string, targs []types2.Type) string {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		b.WriteString(types2.TypeString(targ,
-			func(*types2.Package) string { return "" }))
+		tname := types2.TypeString(targ,
+			func(*types2.Package) string { return "" })
+		if strings.Index(tname, ", ") >= 0 {
+			// types2.TypeString puts spaces after a comma in a type
+			// list, but we don't want spaces in our actual type names
+			// and method/function names derived from them.
+			tname = strings.Replace(tname, ", ", ",", -1)
+		}
+		b.WriteString(tname)
 	}
 	b.WriteByte(']')
 	return b.String()
@@ -174,11 +181,20 @@ func (g *irgen) typ0(typ types2.Type) *types.Type {
 
 	case *types2.Interface:
 		embeddeds := make([]*types.Field, typ.NumEmbeddeds())
+		j := 0
 		for i := range embeddeds {
 			// TODO(mdempsky): Get embedding position.
 			e := typ.EmbeddedType(i)
-			embeddeds[i] = types.NewField(src.NoXPos, nil, g.typ1(e))
+			if t := types2.AsInterface(e); t != nil && t.IsComparable() {
+				// Ignore predefined type 'comparable', since it
+				// doesn't resolve and it doesn't have any
+				// relevant methods.
+				continue
+			}
+			embeddeds[j] = types.NewField(src.NoXPos, nil, g.typ1(e))
+			j++
 		}
+		embeddeds = embeddeds[:j]
 
 		methods := make([]*types.Field, typ.NumExplicitMethods())
 		for i := range methods {
