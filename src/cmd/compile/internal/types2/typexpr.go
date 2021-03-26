@@ -463,6 +463,7 @@ func (check *Checker) typInternal(e0 syntax.Expr, def *Named) (T Type) {
 		// ignore - error reported before
 
 	case *syntax.Name:
+		// shizhz - 对标识符进行类型检查，检查的逻辑是从作用域中找出该标识符的 Object 对象，然后递归进行类型检查。
 		var x operand
 		check.ident(&x, e, def, true)
 
@@ -497,6 +498,7 @@ func (check *Checker) typInternal(e0 syntax.Expr, def *Named) (T Type) {
 		}
 
 	case *syntax.IndexExpr:
+		// shizhz - 该方法的表达式一定是类型表达式，而类型表达式中 A[int] 一定是泛型的实例化
 		return check.instantiatedType(e.X, unpackExpr(e.Index), def)
 
 	case *syntax.ParenExpr:

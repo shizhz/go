@@ -305,11 +305,42 @@ package p
 
 // }
 
-type A struct {
-    self A
-}
-`
+// type params init
+// func playWithA(a A[int, float32])A[int32, string] {
+//     return a
+// }
 
+// type A[T any, K comparable] struct {
+//     t T
+// k K
+// }
+
+
+ // import "unsafe"
+// func f() {
+// 	var _ A
+// }
+
+// type A interface {
+// 	m([unsafe.Sizeof(f)]byte)
+// }
+// type I interface {
+// 	m([unsafe.Sizeof(func() { I.m(nil) })]byte)
+// }
+
+type A struct {
+}
+
+func (this *A) age( )int {
+
+}
+
+func (this *A) name( )  {
+this.age()
+}
+
+
+`
 	f, err := parseSrc("testTypecheckConst", code)
 
 	if err != nil {

@@ -269,17 +269,22 @@ func (check *Checker) checkFiles(files []*syntax.File) (err error) {
 	// shizhz - 将 AST 中的声明转换成 Object 与 declInfo, 然后存放在 checker 中。检查命名冲突，并将结构体的方法组织在一起
 	// 相当于类型检查的预处理逻辑，方法初始化了如下字段：
 	// - info.Defs
+	// - info.Implicits
 	// - checker.methods
 	// - checker.objMap
+	// - checker.imports
 	check.collectObjects()
 
 	print("== packageObjects ==")
+	// shizhz - 对全局申明进行类型检查，围绕着每个 Object 对象展开，以递归下降的方式进行
 	check.packageObjects()
 
 	print("== processDelayed ==")
+	// shizhz - 处理类型检查的后续动作，例如检查类型合法性、对函数体进行检查等。
 	check.processDelayed(0) // incl. all functions
 
 	print("== initOrder ==")
+	// 建立变量初始化的DAG, 即初始化 info.InitOrder 属性
 	check.initOrder()
 
 	if !check.conf.DisableUnusedImportCheck {
