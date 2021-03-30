@@ -297,49 +297,19 @@ func TestTypecheckConst(t *testing.T) {
 	code := `
 package p
 
-// type user struct {
-// 	name string
-// }
-
-// func (this user) name() {
-
-// }
-
-// type params init
-// func playWithA(a A[int, float32])A[int32, string] {
-//     return a
-// }
-
-// type A[T any, K comparable] struct {
-//     t T
-// k K
-// }
-
-
- // import "unsafe"
-// func f() {
-// 	var _ A
-// }
-
-// type A interface {
-// 	m([unsafe.Sizeof(f)]byte)
-// }
-// type I interface {
-// 	m([unsafe.Sizeof(func() { I.m(nil) })]byte)
-// }
-
 type A struct {
 }
 
-func (this *A) age( )int {
-
+func (this *A) name() {
 }
 
-func (this *A) name( )  {
-this.age()
+type B *A
+
+func main() {
+   var b B
+
+b.name()
 }
-
-
 `
 	f, err := parseSrc("testTypecheckConst", code)
 
