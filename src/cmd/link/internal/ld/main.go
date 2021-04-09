@@ -118,7 +118,11 @@ func Main(arch *sys.Arch, theArch Arch) {
 	addstrdata1(ctxt, "runtime.defaultGOROOT="+final)
 	addstrdata1(ctxt, "cmd/internal/objabi.defaultGOROOT="+final)
 
-	addstrdata1(ctxt, "runtime/internal/sys.GOEXPERIMENT="+objabi.GOEXPERIMENT)
+	buildVersion := objabi.Version
+	if goexperiment := objabi.GOEXPERIMENT(); goexperiment != "" {
+		buildVersion += " X:" + goexperiment
+	}
+	addstrdata1(ctxt, "runtime.buildVersion="+buildVersion)
 
 	// TODO(matloob): define these above and then check flag values here
 	if ctxt.Arch.Family == sys.AMD64 && objabi.GOOS == "plan9" {

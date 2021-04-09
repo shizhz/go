@@ -1,4 +1,3 @@
-// UNREVIEWED
 // Copyright 2013 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
@@ -217,7 +216,7 @@ func (check *Checker) collectObjects() {
 		// but there is no corresponding package object.
 		check.recordDef(file.PkgName, nil)
 
-		fileScope := NewScope(check.pkg.scope, startPos(file), endPos(file), check.filename(fileNo))
+		fileScope := NewScope(check.pkg.scope, syntax.StartPos(file), syntax.EndPos(file), check.filename(fileNo))
 		fileScopes = append(fileScopes, fileScope)
 		check.recordScope(file, fileScope)
 
@@ -428,7 +427,7 @@ func (check *Checker) collectObjects() {
 				} else {
 					// method
 					// d.Recv != nil
-					if !methodTypeParamsOk && len(d.TParamList) != 0 {
+					if !acceptMethodTypeParams && len(d.TParamList) != 0 {
 						//check.error(d.TParamList.Pos(), invalidAST + "method must have no type parameters")
 						check.error(d, invalidAST+"method must have no type parameters")
 					}

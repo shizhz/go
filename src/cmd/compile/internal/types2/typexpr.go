@@ -15,6 +15,9 @@ import (
 	"strings"
 )
 
+// Disabled by default, but enabled when running tests (via types_test.go).
+var acceptMethodTypeParams bool
+
 // ident type-checks identifier e and initializes x with the value or type of e.
 // If an error occurred, x.mode is set to invalid.
 // For the meaning of def, see Checker.definedType, below.
@@ -131,7 +134,7 @@ func (check *Checker) typ(e syntax.Expr) Type {
 // (see ordinaryType).
 func (check *Checker) varType(e syntax.Expr) Type {
 	typ := check.definedType(e, nil)
-	check.ordinaryType(startPos(e), typ)
+	check.ordinaryType(syntax.StartPos(e), typ)
 	return typ
 }
 
@@ -336,7 +339,7 @@ func (check *Checker) funcType(sig *Signature, recvPar *syntax.Field, tparams []
 		// Always type-check method type parameters but complain if they are not enabled.
 		// (A separate check is needed when type-checking interface method signatures because
 		// they don't have a receiver specification.)
-		if recvPar != nil && !check.conf.AcceptMethodTypeParams {
+		if recvPar != nil && !acceptMethodTypeParams {
 			check.error(ftyp, "methods cannot have type parameters")
 		}
 	}
@@ -673,7 +676,7 @@ func (check *Checker) instantiatedType(x syntax.Expr, targs []syntax.Expr, def *
 	// determine argument positions (for error reporting)
 	typ.poslist = make([]syntax.Pos, len(targs))
 	for i, arg := range targs {
-		typ.poslist[i] = arg.Pos()
+		typ.poslist[i] = syntax.StartPos(arg)
 	}
 
 	// make sure we check instantiation works at least once
@@ -850,7 +853,7 @@ func (check *Checker) interfaceType(ityp *Interface, iface *syntax.InterfaceType
 			// Always type-check method type parameters but complain if they are not enabled.
 			// (This extra check is needed here because interface method signatures don't have
 			// a receiver specification.)
-			if sig.tparams != nil && !check.conf.AcceptMethodTypeParams {
+			if sig.tparams != nil && !acceptMethodTypeParams {
 				check.error(f.Type, "methods cannot have type parameters")
 			}
 
@@ -1156,7 +1159,7 @@ func (check *Checker) structType(styp *Struct, e *syntax.StructType) {
 			// spec: "An embedded type must be specified as a type name T or as a
 			// pointer to a non-interface type name *T, and T itself may not be a
 			// pointer type."
-			pos := startPos(f.Type)
+			pos := syntax.StartPos(f.Type)
 			name := embeddedFieldIdent(f.Type)
 			if name == nil {
 				check.errorf(pos, "invalid embedded field type %s", f.Type)

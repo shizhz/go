@@ -211,9 +211,13 @@ func appendParamOffsets(offsets []int64, at int64, t *types.Type) ([]int64, int6
 				offsets, at = appendParamOffsets(offsets, at, t.Elem())
 			}
 		case types.TSTRUCT:
-			for _, f := range t.FieldSlice() {
+			for i, f := range t.FieldSlice() {
 				offsets, at = appendParamOffsets(offsets, at, f.Type)
+				if f.Type.Width == 0 && i == t.NumFields()-1 {
+					at++ // last field has zero width
+				}
 			}
+			at = align(at, t) // type size is rounded up to its alignment
 		case types.TSLICE:
 			return appendParamOffsets(offsets, at, synthSlice)
 		case types.TSTRING:

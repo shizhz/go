@@ -146,6 +146,13 @@ func (s *SymABIs) GenABIWrappers() {
 			fn.ABI = defABI
 		}
 
+		if fn.Pragma&ir.CgoUnsafeArgs != 0 {
+			// CgoUnsafeArgs indicates the function (or its callee) uses
+			// offsets to dispatch arguments, which currently using ABI0
+			// frame layout. Pin it to ABI0.
+			fn.ABI = obj.ABI0
+		}
+
 		// Apply references.
 		if abis, ok := s.refs[symName]; ok {
 			fn.ABIRefs |= abis
@@ -282,13 +289,6 @@ func makeABIWrapper(f *ir.Func, wrapperABI obj.ABI) {
 
 	fn.SetABIWrapper(true)
 	fn.SetDupok(true)
-	// Set this as a wrapper so it doesn't appear in tracebacks.
-	// Having both ABIWrapper and Wrapper set suppresses obj's
-	// usual panic+recover handling for wrappers; that's okay
-	// because we're never going to defer a wrapper for a function
-	// that then recovers, so that's would just be unnecessary
-	// code in the ABI wrapper.
-	fn.SetWrapper(true)
 
 	// ABI0-to-ABIInternal wrappers will be mainly loading params from
 	// stack into registers (and/or storing stack locations back to
@@ -393,10 +393,20 @@ func setupTextLSym(f *ir.Func, flag int) {
 	}
 
 	// Clumsy but important.
+	// For functions that could be on the path of invoking a deferred
+	// function that can recover (runtime.reflectcall, reflect.callReflect,
+	// and reflect.callMethod), we want the panic+recover special handling.
 	// See test/recover.go for test cases and src/reflect/value.go
 	// for the actual functions being considered.
-	if base.Ctxt.Pkgpath == "reflect" {
-		switch f.Sym().Name {
+	//
+	// runtime.reflectcall is an assembly function which tailcalls
+	// WRAPPER functions (runtime.callNN). Its ABI wrapper needs WRAPPER
+	// flag as well.
+	fnname := f.Sym().Name
+	if base.Ctxt.Pkgpath == "runtime" && fnname == "reflectcall" {
+		flag |= obj.WRAPPER
+	} else if base.Ctxt.Pkgpath == "reflect" {
+		switch fnname {
 		case "callReflect", "callMethod":
 			flag |= obj.WRAPPER
 		}

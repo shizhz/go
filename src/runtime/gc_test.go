@@ -205,15 +205,24 @@ func TestGcZombieReporting(t *testing.T) {
 func TestGCTestMoveStackOnNextCall(t *testing.T) {
 	t.Parallel()
 	var onStack int
-	runtime.GCTestMoveStackOnNextCall()
-	moveStackCheck(t, &onStack, uintptr(unsafe.Pointer(&onStack)))
+	// GCTestMoveStackOnNextCall can fail in rare cases if there's
+	// a preemption. This won't happen many times in quick
+	// succession, so just retry a few times.
+	for retry := 0; retry < 5; retry++ {
+		runtime.GCTestMoveStackOnNextCall()
+		if moveStackCheck(t, &onStack, uintptr(unsafe.Pointer(&onStack))) {
+			// Passed.
+			return
+		}
+	}
+	t.Fatal("stack did not move")
 }
 
 // This must not be inlined because the point is to force a stack
 // growth check and move the stack.
 //
 //go:noinline
-func moveStackCheck(t *testing.T, new *int, old uintptr) {
+func moveStackCheck(t *testing.T, new *int, old uintptr) bool {
 	// new should have been updated by the stack move;
 	// old should not have.
 
@@ -228,7 +237,25 @@ func moveStackCheck(t *testing.T, new *int, old uintptr) {
 			t.Fatalf("test bug: new (%#x) should be a stack pointer, not %s", new2, cls)
 		}
 		// This was a real failure.
-		t.Fatal("stack did not move")
+		return false
+	}
+	return true
+}
+
+func TestGCTestMoveStackRepeatedly(t *testing.T) {
+	// Move the stack repeatedly to make sure we're not doubling
+	// it each time.
+	for i := 0; i < 100; i++ {
+		runtime.GCTestMoveStackOnNextCall()
+		moveStack1(false)
+	}
+}
+
+//go:noinline
+func moveStack1(x bool) {
+	// Make sure this function doesn't get auto-nosplit.
+	if x {
+		println("x")
 	}
 }
 

@@ -1,4 +1,3 @@
-// UNREVIEWED
 // Copyright 2014 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
@@ -325,7 +324,7 @@ func (check *Checker) validType(typ Type, path []Object) typeInfo {
 		}
 
 		// don't report a 2nd error if we already know the type is invalid
-		// (e.g., if a cycle was detected earlier, via Checker.underlying).
+		// (e.g., if a cycle was detected earlier, via under).
 		if t.underlying == Typ[Invalid] {
 			t.info = invalid
 			return invalid
@@ -384,45 +383,12 @@ func (check *Checker) cycleError(cycle []Object) {
 	check.report(&err)
 }
 
-// TODO(gri) This functionality should probably be with the Pos implementation.
-func cmpPos(p, q syntax.Pos) int {
-	// TODO(gri) is RelFilename correct here?
-	pname := p.RelFilename()
-	qname := q.RelFilename()
-	switch {
-	case pname < qname:
-		return -1
-	case pname > qname:
-		return +1
-	}
-
-	pline := p.Line()
-	qline := q.Line()
-	switch {
-	case pline < qline:
-		return -1
-	case pline > qline:
-		return +1
-	}
-
-	pcol := p.Col()
-	qcol := q.Col()
-	switch {
-	case pcol < qcol:
-		return -1
-	case pcol > qcol:
-		return +1
-	}
-
-	return 0
-}
-
 // firstInSrc reports the index of the object with the "smallest"
 // source position in path. path must not be empty.
 func firstInSrc(path []Object) int {
 	fst, pos := 0, path[0].Pos()
 	for i, t := range path[1:] {
-		if cmpPos(t.Pos(), pos) < 0 {
+		if t.Pos().Cmp(pos) < 0 {
 			fst, pos = i+1, t.Pos()
 		}
 	}
@@ -902,7 +868,7 @@ func (check *Checker) declStmt(list []syntax.Decl) {
 			// inside a function begins at the end of the ConstSpec or VarSpec
 			// (ShortVarDecl for short variable declarations) and ends at the
 			// end of the innermost containing block."
-			scopePos := endPos(s)
+			scopePos := syntax.EndPos(s)
 			for i, name := range s.NameList {
 				check.declare(check.scope, name, lhs[i], scopePos)
 			}
@@ -959,7 +925,7 @@ func (check *Checker) declStmt(list []syntax.Decl) {
 
 			// declare all variables
 			// (only at this point are the variable scopes (parents) set)
-			scopePos := endPos(s) // see constant declarations
+			scopePos := syntax.EndPos(s) // see constant declarations
 			for i, name := range s.NameList {
 				// see constant declarations
 				check.declare(check.scope, name, lhs0[i], scopePos)

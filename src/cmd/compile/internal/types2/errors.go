@@ -1,4 +1,3 @@
-// UNREVIEWED
 // Copyright 2012 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
@@ -208,10 +207,10 @@ func posFor(at poser) syntax.Pos {
 	switch x := at.(type) {
 	case *operand:
 		if x.expr != nil {
-			return startPos(x.expr)
+			return syntax.StartPos(x.expr)
 		}
 	case syntax.Node:
-		return startPos(x)
+		return syntax.StartPos(x)
 	}
 	return at.Pos()
 }

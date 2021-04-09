@@ -205,96 +205,90 @@ var optab = []Optab{
 
 	{as: AMOVB, a1: C_ADDR, a6: C_REG, type_: 76, size: 12},
 	{as: AMOVB, a1: C_LOREG, a6: C_REG, type_: 37, size: 12},
+	{as: AMOVB, a1: C_SOREG, a6: C_REG, type_: 9, size: 8},
 	{as: AMOVB, a1: C_REG, a6: C_ADDR, type_: 74, size: 8},
+	{as: AMOVB, a1: C_REG, a6: C_SOREG, type_: 7, size: 4},
 	{as: AMOVB, a1: C_REG, a6: C_LOREG, type_: 35, size: 8},
 	{as: AMOVB, a1: C_REG, a6: C_REG, type_: 12, size: 4},
-	{as: AMOVB, a1: C_REG, a6: C_SOREG, type_: 7, size: 4},
-	{as: AMOVB, a1: C_SOREG, a6: C_REG, type_: 9, size: 8},
 
 	{as: AMOVBZ, a1: C_ADDR, a6: C_REG, type_: 75, size: 8},
 	{as: AMOVBZ, a1: C_LOREG, a6: C_REG, type_: 36, size: 8},
+	{as: AMOVBZ, a1: C_SOREG, a6: C_REG, type_: 8, size: 4},
 	{as: AMOVBZ, a1: C_REG, a6: C_ADDR, type_: 74, size: 8},
+	{as: AMOVBZ, a1: C_REG, a6: C_SOREG, type_: 7, size: 4},
 	{as: AMOVBZ, a1: C_REG, a6: C_LOREG, type_: 35, size: 8},
 	{as: AMOVBZ, a1: C_REG, a6: C_REG, type_: 13, size: 4},
-	{as: AMOVBZ, a1: C_REG, a6: C_SOREG, type_: 7, size: 4},
-	{as: AMOVBZ, a1: C_SOREG, a6: C_REG, type_: 8, size: 4},
 
 	{as: AMOVD, a1: C_ADDCON, a6: C_REG, type_: 3, size: 4},
-	{as: AMOVD, a1: C_ADDR, a6: C_REG, type_: 75, size: 8},
 	{as: AMOVD, a1: C_ANDCON, a6: C_REG, type_: 3, size: 4},
-	{as: AMOVD, a1: C_CTR, a6: C_REG, type_: 66, size: 4},
+	{as: AMOVD, a1: C_UCON, a6: C_REG, type_: 3, size: 4},
+	{as: AMOVD, a1: C_SACON, a6: C_REG, type_: 3, size: 4},
+	{as: AMOVD, a1: C_ADDR, a6: C_REG, type_: 75, size: 8},
+	{as: AMOVD, a1: C_LCON, a6: C_REG, type_: 19, size: 8},
 	{as: AMOVD, a1: C_GOTADDR, a6: C_REG, type_: 81, size: 8},
 	{as: AMOVD, a1: C_LACON, a6: C_REG, type_: 26, size: 8},
-	{as: AMOVD, a1: C_LCON, a6: C_REG, type_: 19, size: 8},
-	{as: AMOVD, a1: C_LECON, a6: C_REG, type_: 26, size: 8},
-	{as: AMOVD, a1: C_LOREG, a6: C_REG, type_: 36, size: 8},
-	{as: AMOVD, a1: C_LR, a6: C_REG, type_: 66, size: 4},
-	{as: AMOVD, a1: C_MSR, a6: C_REG, type_: 54, size: 4}, /* mfmsr */
-	{as: AMOVD, a1: C_REG, a6: C_ADDR, type_: 74, size: 8},
-	{as: AMOVD, a1: C_REG, a6: C_CTR, type_: 66, size: 4},
-	{as: AMOVD, a1: C_REG, a6: C_LOREG, type_: 35, size: 8},
-	{as: AMOVD, a1: C_REG, a6: C_LR, type_: 66, size: 4},
-	{as: AMOVD, a1: C_REG, a6: C_MSR, type_: 54, size: 4}, /* mtmsrd */
-	{as: AMOVD, a1: C_REG, a6: C_REG, type_: 1, size: 4},
-	{as: AMOVD, a1: C_REG, a6: C_SOREG, type_: 7, size: 4},
-	{as: AMOVD, a1: C_REG, a6: C_SPR, type_: 66, size: 4},
-	{as: AMOVD, a1: C_REG, a6: C_XER, type_: 66, size: 4},
-	{as: AMOVD, a1: C_SACON, a6: C_REG, type_: 3, size: 4},
-	{as: AMOVD, a1: C_SECON, a6: C_REG, type_: 3, size: 4},
 	{as: AMOVD, a1: C_SOREG, a6: C_REG, type_: 8, size: 4},
-	{as: AMOVD, a1: C_SPR, a6: C_REG, type_: 66, size: 4},
-	{as: AMOVD, a1: C_TLS_IE, a6: C_REG, type_: 80, size: 8},
+	{as: AMOVD, a1: C_LOREG, a6: C_REG, type_: 36, size: 8},
 	{as: AMOVD, a1: C_TLS_LE, a6: C_REG, type_: 79, size: 4},
+	{as: AMOVD, a1: C_TLS_IE, a6: C_REG, type_: 80, size: 8},
 	{as: AMOVD, a1: C_TOCADDR, a6: C_REG, type_: 95, size: 8},
-	{as: AMOVD, a1: C_UCON, a6: C_REG, type_: 3, size: 4},
-	{as: AMOVD, a1: C_XER, a6: C_REG, type_: 66, size: 4},
+	{as: AMOVD, a1: C_SPR, a6: C_REG, type_: 66, size: 4},
+	{as: AMOVD, a1: C_REG, a6: C_ADDR, type_: 74, size: 8},
+	{as: AMOVD, a1: C_REG, a6: C_SOREG, type_: 7, size: 4},
+	{as: AMOVD, a1: C_REG, a6: C_LOREG, type_: 35, size: 8},
+	{as: AMOVD, a1: C_REG, a6: C_SPR, type_: 66, size: 4},
+	{as: AMOVD, a1: C_REG, a6: C_REG, type_: 1, size: 4},
 
 	{as: AMOVW, a1: C_ADDCON, a6: C_REG, type_: 3, size: 4},
-	{as: AMOVW, a1: C_ADDR, a6: C_REG, type_: 75, size: 8},
 	{as: AMOVW, a1: C_ANDCON, a6: C_REG, type_: 3, size: 4},
+	{as: AMOVW, a1: C_UCON, a6: C_REG, type_: 3, size: 4},
+	{as: AMOVW, a1: C_SACON, a6: C_REG, type_: 3, size: 4},
+	{as: AMOVW, a1: C_ADDR, a6: C_REG, type_: 75, size: 8},
+	{as: AMOVW, a1: C_LCON, a6: C_REG, type_: 19, size: 8},
 	{as: AMOVW, a1: C_CREG, a6: C_REG, type_: 68, size: 4},
 	{as: AMOVW, a1: C_LACON, a6: C_REG, type_: 26, size: 8},
-	{as: AMOVW, a1: C_LCON, a6: C_REG, type_: 19, size: 8},
-	{as: AMOVW, a1: C_LECON, a6: C_REG, type_: 26, size: 8},
+	{as: AMOVW, a1: C_SOREG, a6: C_REG, type_: 8, size: 4},
 	{as: AMOVW, a1: C_LOREG, a6: C_REG, type_: 36, size: 8},
+	{as: AMOVW, a1: C_SPR, a6: C_REG, type_: 66, size: 4},
 	{as: AMOVW, a1: C_REG, a6: C_ADDR, type_: 74, size: 8},
 	{as: AMOVW, a1: C_REG, a6: C_CREG, type_: 69, size: 4},
-	{as: AMOVW, a1: C_REG, a6: C_CTR, type_: 66, size: 4},
-	{as: AMOVW, a1: C_REG, a6: C_LOREG, type_: 35, size: 8},
-	{as: AMOVW, a1: C_REG, a6: C_REG, type_: 12, size: 4},
 	{as: AMOVW, a1: C_REG, a6: C_SOREG, type_: 7, size: 4},
+	{as: AMOVW, a1: C_REG, a6: C_LOREG, type_: 35, size: 8},
 	{as: AMOVW, a1: C_REG, a6: C_SPR, type_: 66, size: 4},
-	{as: AMOVW, a1: C_REG, a6: C_XER, type_: 66, size: 4},
-	{as: AMOVW, a1: C_SACON, a6: C_REG, type_: 3, size: 4},
-	{as: AMOVW, a1: C_SECON, a6: C_REG, type_: 3, size: 4}, /* TO DO: check */
-	{as: AMOVW, a1: C_SOREG, a6: C_REG, type_: 8, size: 4},
-	{as: AMOVW, a1: C_SPR, a6: C_REG, type_: 66, size: 4},
-	{as: AMOVW, a1: C_UCON, a6: C_REG, type_: 3, size: 4},
-	{as: AMOVW, a1: C_XER, a6: C_REG, type_: 66, size: 4},
+	{as: AMOVW, a1: C_REG, a6: C_REG, type_: 12, size: 4},
 
 	{as: AMOVWZ, a1: C_ADDCON, a6: C_REG, type_: 3, size: 4},
-	{as: AMOVWZ, a1: C_ADDR, a6: C_REG, type_: 75, size: 8},
 	{as: AMOVWZ, a1: C_ANDCON, a6: C_REG, type_: 3, size: 4},
+	{as: AMOVWZ, a1: C_UCON, a6: C_REG, type_: 3, size: 4},
+	{as: AMOVWZ, a1: C_SACON, a6: C_REG, type_: 3, size: 4},
+	{as: AMOVWZ, a1: C_ADDR, a6: C_REG, type_: 75, size: 8},
+	{as: AMOVWZ, a1: C_LCON, a6: C_REG, type_: 19, size: 8},
 	{as: AMOVWZ, a1: C_CREG, a6: C_REG, type_: 68, size: 4},
 	{as: AMOVWZ, a1: C_LACON, a6: C_REG, type_: 26, size: 8},
-	{as: AMOVWZ, a1: C_LCON, a6: C_REG, type_: 19, size: 8},
-	{as: AMOVWZ, a1: C_LECON, a6: C_REG, type_: 26, size: 8},
+	{as: AMOVWZ, a1: C_SOREG, a6: C_REG, type_: 8, size: 4},
 	{as: AMOVWZ, a1: C_LOREG, a6: C_REG, type_: 36, size: 8},
+	{as: AMOVWZ, a1: C_SPR, a6: C_REG, type_: 66, size: 4},
 	{as: AMOVWZ, a1: C_REG, a6: C_ADDR, type_: 74, size: 8},
 	{as: AMOVWZ, a1: C_REG, a6: C_CREG, type_: 69, size: 4},
-	{as: AMOVWZ, a1: C_REG, a6: C_CTR, type_: 66, size: 4},
-	{as: AMOVWZ, a1: C_REG, a6: C_LOREG, type_: 35, size: 8},
-	{as: AMOVWZ, a1: C_REG, a6: C_MSR, type_: 54, size: 4}, /* mtmsr */
-	{as: AMOVWZ, a1: C_REG, a6: C_REG, type_: 13, size: 4},
 	{as: AMOVWZ, a1: C_REG, a6: C_SOREG, type_: 7, size: 4},
+	{as: AMOVWZ, a1: C_REG, a6: C_LOREG, type_: 35, size: 8},
 	{as: AMOVWZ, a1: C_REG, a6: C_SPR, type_: 66, size: 4},
-	{as: AMOVWZ, a1: C_REG, a6: C_XER, type_: 66, size: 4},
-	{as: AMOVWZ, a1: C_SACON, a6: C_REG, type_: 3, size: 4},
-	{as: AMOVWZ, a1: C_SECON, a6: C_REG, type_: 3, size: 4}, /* TO DO: check */
-	{as: AMOVWZ, a1: C_SOREG, a6: C_REG, type_: 8, size: 4},
-	{as: AMOVWZ, a1: C_SPR, a6: C_REG, type_: 66, size: 4},
-	{as: AMOVWZ, a1: C_UCON, a6: C_REG, type_: 3, size: 4},
-	{as: AMOVWZ, a1: C_XER, a6: C_REG, type_: 66, size: 4},
+	{as: AMOVWZ, a1: C_REG, a6: C_REG, type_: 13, size: 4},
+
+	{as: AFMOVD, a1: C_ADDCON, a6: C_FREG, type_: 24, size: 8},
+	{as: AFMOVD, a1: C_SOREG, a6: C_FREG, type_: 8, size: 4},
+	{as: AFMOVD, a1: C_LOREG, a6: C_FREG, type_: 36, size: 8},
+	{as: AFMOVD, a1: C_ZCON, a6: C_FREG, type_: 24, size: 4},
+	{as: AFMOVD, a1: C_ADDR, a6: C_FREG, type_: 75, size: 8},
+	{as: AFMOVD, a1: C_FREG, a6: C_FREG, type_: 33, size: 4},
+	{as: AFMOVD, a1: C_FREG, a6: C_SOREG, type_: 7, size: 4},
+	{as: AFMOVD, a1: C_FREG, a6: C_LOREG, type_: 35, size: 8},
+	{as: AFMOVD, a1: C_FREG, a6: C_ADDR, type_: 74, size: 8},
+
+	{as: AFMOVSX, a1: C_ZOREG, a6: C_FREG, type_: 45, size: 4},
+	{as: AFMOVSX, a1: C_FREG, a6: C_ZOREG, type_: 44, size: 4},
+
+	{as: AFMOVSZ, a1: C_ZOREG, a6: C_FREG, type_: 45, size: 4},
 
 	{as: AMOVFL, a1: C_CREG, a6: C_CREG, type_: 67, size: 4},
 	{as: AMOVFL, a1: C_FPSCR, a6: C_CREG, type_: 73, size: 4},
@@ -324,18 +318,6 @@ var optab = []Optab{
 	{as: ABC, a1: C_SCON, a2: C_REG, a6: C_LR, type_: 18, size: 4},
 	{as: ABC, a1: C_SCON, a2: C_REG, a6: C_CTR, type_: 18, size: 4},
 	{as: ABC, a6: C_ZOREG, type_: 15, size: 8},
-	{as: AFMOVD, a1: C_FREG, a6: C_FREG, type_: 33, size: 4},
-	{as: AFMOVD, a1: C_SOREG, a6: C_FREG, type_: 8, size: 4},
-	{as: AFMOVD, a1: C_LOREG, a6: C_FREG, type_: 36, size: 8},
-	{as: AFMOVD, a1: C_ZCON, a6: C_FREG, type_: 24, size: 4},
-	{as: AFMOVD, a1: C_ADDCON, a6: C_FREG, type_: 24, size: 8},
-	{as: AFMOVD, a1: C_ADDR, a6: C_FREG, type_: 75, size: 8},
-	{as: AFMOVD, a1: C_FREG, a6: C_SOREG, type_: 7, size: 4},
-	{as: AFMOVD, a1: C_FREG, a6: C_LOREG, type_: 35, size: 8},
-	{as: AFMOVD, a1: C_FREG, a6: C_ADDR, type_: 74, size: 8},
-	{as: AFMOVSX, a1: C_ZOREG, a6: C_FREG, type_: 45, size: 4},
-	{as: AFMOVSX, a1: C_FREG, a6: C_ZOREG, type_: 44, size: 4},
-	{as: AFMOVSZ, a1: C_ZOREG, a6: C_FREG, type_: 45, size: 4},
 	{as: ASYNC, type_: 46, size: 4},
 	{as: AWORD, a1: C_LCON, type_: 40, size: 4},
 	{as: ADWORD, a1: C_LCON, type_: 31, size: 8},
@@ -616,8 +598,6 @@ func (c *ctxt9) getimpliedreg(a *obj.Addr, p *obj.Prog) int {
 	switch oclass(a) {
 	case C_ADDCON, C_ANDCON, C_UCON, C_LCON, C_SCON, C_ZCON:
 		return REGZERO
-	case C_SECON, C_LECON:
-		return REGSB
 	case C_SACON, C_LACON:
 		return REGSP
 	case C_LOREG, C_SOREG, C_ZOREG:
@@ -823,9 +803,6 @@ func (c *ctxt9) aclass(a *obj.Addr) int {
 		}
 		if a.Reg == REG_FPSCR {
 			return C_FPSCR
-		}
-		if a.Reg == REG_MSR {
-			return C_MSR
 		}
 		return C_GOK
 
@@ -2183,15 +2160,12 @@ const (
 	OP_MCRXR    = 31<<26 | 512<<1 | 0<<10 | 0
 	OP_MFCR     = 31<<26 | 19<<1 | 0<<10 | 0
 	OP_MFFS     = 63<<26 | 583<<1 | 0<<10 | 0
-	OP_MFMSR    = 31<<26 | 83<<1 | 0<<10 | 0
 	OP_MFSPR    = 31<<26 | 339<<1 | 0<<10 | 0
 	OP_MFSR     = 31<<26 | 595<<1 | 0<<10 | 0
 	OP_MFSRIN   = 31<<26 | 659<<1 | 0<<10 | 0
 	OP_MTCRF    = 31<<26 | 144<<1 | 0<<10 | 0
 	OP_MTFSF    = 63<<26 | 711<<1 | 0<<10 | 0
 	OP_MTFSFI   = 63<<26 | 134<<1 | 0<<10 | 0
-	OP_MTMSR    = 31<<26 | 146<<1 | 0<<10 | 0
-	OP_MTMSRD   = 31<<26 | 178<<1 | 0<<10 | 0
 	OP_MTSPR    = 31<<26 | 467<<1 | 0<<10 | 0
 	OP_MTSR     = 31<<26 | 210<<1 | 0<<10 | 0
 	OP_MTSRIN   = 31<<26 | 242<<1 | 0<<10 | 0
@@ -3267,17 +3241,6 @@ func (c *ctxt9) asmout(p *obj.Prog, o *Optab, out []uint32) {
 
 	case 53: /* mffsX ,fr1 */
 		o1 = AOP_RRR(OP_MFFS, uint32(p.To.Reg), 0, 0)
-
-	case 54: /* mov msr,r1; mov r1, msr*/
-		if oclass(&p.From) == C_REG {
-			if p.As == AMOVD {
-				o1 = AOP_RRR(OP_MTMSRD, uint32(p.From.Reg), 0, 0)
-			} else {
-				o1 = AOP_RRR(OP_MTMSR, uint32(p.From.Reg), 0, 0)
-			}
-		} else {
-			o1 = AOP_RRR(OP_MFMSR, uint32(p.To.Reg), 0, 0)
-		}
 
 	case 55: /* op Rb, Rd */
 		o1 = AOP_RRR(c.oprrr(p.As), uint32(p.To.Reg), 0, uint32(p.From.Reg))

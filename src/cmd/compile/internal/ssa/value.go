@@ -139,6 +139,9 @@ func (v *Value) AuxArm64BitField() arm64BitField {
 
 // long form print.  v# = opcode <type> [aux] args [: reg] (names)
 func (v *Value) LongString() string {
+	if v == nil {
+		return "<NIL VALUE>"
+	}
 	s := fmt.Sprintf("v%d = %s", v.ID, v.Op)
 	s += " <" + v.Type.String() + ">"
 	s += v.auxString()
@@ -341,6 +344,35 @@ func (v *Value) reset(op Op) {
 	}
 	v.Op = op
 	v.resetArgs()
+	v.AuxInt = 0
+	v.Aux = nil
+}
+
+// invalidateRecursively marks a value as invalid (unused)
+// and after decrementing reference counts on its Args,
+// also recursively invalidates any of those whose use
+// count goes to zero.
+//
+// BEWARE of doing this *before* you've applied intended
+// updates to SSA.
+func (v *Value) invalidateRecursively() {
+	if v.InCache {
+		v.Block.Func.unCache(v)
+	}
+	v.Op = OpInvalid
+
+	for _, a := range v.Args {
+		a.Uses--
+		if a.Uses == 0 {
+			a.invalidateRecursively()
+		}
+	}
+
+	v.argstorage[0] = nil
+	v.argstorage[1] = nil
+	v.argstorage[2] = nil
+	v.Args = v.argstorage[:0]
+
 	v.AuxInt = 0
 	v.Aux = nil
 }

@@ -96,7 +96,7 @@ func (check *Checker) overflow(x *operand) {
 	// If the corresponding expression is an operation, use the
 	// operator position rather than the start of the expression
 	// as error position.
-	pos := startPos(x.expr)
+	pos := syntax.StartPos(x.expr)
 	what := "" // operator description, if any
 	if op, _ := x.expr.(*syntax.Operation); op != nil {
 		pos = op.Pos()
@@ -1960,12 +1960,6 @@ func (check *Checker) expr(x *operand, e syntax.Expr) {
 func (check *Checker) multiExpr(x *operand, e syntax.Expr) {
 	check.rawExpr(x, e, nil)
 	check.exclude(x, 1<<novalue|1<<builtin|1<<typexpr)
-}
-
-// multiExprOrType is like multiExpr but the result may also be a type.
-func (check *Checker) multiExprOrType(x *operand, e syntax.Expr) {
-	check.rawExpr(x, e, nil)
-	check.exclude(x, 1<<novalue|1<<builtin)
 }
 
 // exprWithHint typechecks expression e and initializes x with the expression value;

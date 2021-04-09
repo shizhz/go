@@ -1,4 +1,3 @@
-// UNREVIEWED
 // Copyright 2012 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
@@ -17,13 +16,13 @@ func (check *Checker) funcBody(decl *declInfo, name string, sig *Signature, body
 	if check.conf.Trace {
 		check.trace(body.Pos(), "--- %s: %s", name, sig)
 		defer func() {
-			check.trace(endPos(body), "--- <end>")
+			check.trace(syntax.EndPos(body), "--- <end>")
 		}()
 	}
 
 	// set function scope extent
 	sig.scope.pos = body.Pos()
-	sig.scope.end = endPos(body)
+	sig.scope.end = syntax.EndPos(body)
 
 	// save/restore current context and setup function context
 	// (and use 0 indentation at function start)
@@ -67,7 +66,7 @@ func (check *Checker) usage(scope *Scope) {
 		}
 	}
 	sort.Slice(unused, func(i, j int) bool {
-		return cmpPos(unused[i].pos, unused[j].pos) < 0
+		return unused[i].pos.Cmp(unused[j].pos) < 0
 	})
 	for _, v := range unused {
 		check.softErrorf(v.pos, "%s declared but not used", v.name)
@@ -155,7 +154,7 @@ func (check *Checker) multipleSelectDefaults(list []*syntax.CommClause) {
 }
 
 func (check *Checker) openScope(node syntax.Node, comment string) {
-	check.openScopeUntil(node, endPos(node), comment)
+	check.openScopeUntil(node, syntax.EndPos(node), comment)
 }
 
 func (check *Checker) openScopeUntil(node syntax.Node, end syntax.Pos, comment string) {
@@ -265,7 +264,7 @@ L:
 	}
 }
 
-func (check *Checker) caseTypes(x *operand, xtyp *Interface, types []syntax.Expr, seen map[Type]syntax.Pos) (T Type) {
+func (check *Checker) caseTypes(x *operand, xtyp *Interface, types []syntax.Expr, seen map[Type]syntax.Expr) (T Type) {
 L:
 	for _, e := range types {
 		T = check.typOrNil(e)
@@ -277,7 +276,7 @@ L:
 		}
 		// look for duplicate types
 		// (quadratic algorithm, but type switches tend to be reasonably small)
-		for t, pos := range seen {
+		for t, other := range seen {
 			if T == nil && t == nil || T != nil && t != nil && check.identical(T, t) {
 				// talk about "case" rather than "type" because of nil case
 				Ts := "nil"
@@ -286,12 +285,12 @@ L:
 				}
 				var err error_
 				err.errorf(e, "duplicate case %s in type switch", Ts)
-				err.errorf(pos, "previous case")
+				err.errorf(other, "previous case")
 				check.report(&err)
 				continue L
 			}
 		}
-		seen[T] = e.Pos()
+		seen[T] = e
 		if T != nil {
 			check.typeAssertion(e.Pos(), x, xtyp, T)
 		}
@@ -409,11 +408,6 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 		check.binary(&x, nil, lhs[0], rhs[0], s.Op)
 		check.assignVar(lhs[0], &x)
 
-	// case *syntax.GoStmt:
-	// 	check.suspendedCall("go", s.Call)
-
-	// case *syntax.DeferStmt:
-	// 	check.suspendedCall("defer", s.Call)
 	case *syntax.CallStmt:
 		// TODO(gri) get rid of this conversion to string
 		kind := "go"
@@ -686,6 +680,10 @@ func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, gu
 	if x.mode == invalid {
 		return
 	}
+	// Caution: We're not using asInterface here because we don't want
+	//          to switch on a suitably constrained type parameter (for
+	//          now).
+	// TODO(gri) Need to revisit this.
 	xtyp, _ := under(x.typ).(*Interface)
 	if xtyp == nil {
 		check.errorf(&x, "%s is not an interface type", &x)
@@ -695,8 +693,8 @@ func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, gu
 
 	check.multipleSwitchDefaults(s.Body)
 
-	var lhsVars []*Var                // list of implicitly declared lhs variables
-	seen := make(map[Type]syntax.Pos) // map of seen types to positions
+	var lhsVars []*Var                 // list of implicitly declared lhs variables
+	seen := make(map[Type]syntax.Expr) // map of seen types to positions
 	for i, clause := range s.Body {
 		if clause == nil {
 			check.error(s, invalidAST+"incorrect type switch case")
@@ -725,7 +723,7 @@ func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, gu
 			// "at the end of the TypeSwitchCase" in #16794 instead?
 			scopePos := clause.Pos() // for default clause (len(List) == 0)
 			if n := len(cases); n > 0 {
-				scopePos = endPos(cases[n-1])
+				scopePos = syntax.EndPos(cases[n-1])
 			}
 			check.declare(check.scope, nil, obj, scopePos)
 			check.recordImplicit(clause, obj)
@@ -739,6 +737,9 @@ func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, gu
 	}
 
 	// If lhs exists, we must have at least one lhs variable that was used.
+	// (We can't use check.usage because that only looks at one scope; and
+	// we don't want to use the same variable for all scopes and change the
+	// variable type underfoot.)
 	if lhs != nil {
 		var used bool
 		for _, v := range lhsVars {
@@ -839,7 +840,7 @@ func (check *Checker) rangeStmt(inner stmtContext, s *syntax.ForStmt, rclause *s
 
 		// declare variables
 		if len(vars) > 0 {
-			scopePos := endPos(rclause.X) // TODO(gri) should this just be s.Body.Pos (spec clarification)?
+			scopePos := syntax.EndPos(rclause.X) // TODO(gri) should this just be s.Body.Pos (spec clarification)?
 			for _, obj := range vars {
 				// spec: "The scope of a constant or variable identifier declared inside
 				// a function begins at the end of the ConstSpec or VarSpec (ShortVarDecl
