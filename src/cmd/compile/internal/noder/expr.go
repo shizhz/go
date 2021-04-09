@@ -15,7 +15,6 @@ import (
 )
 
 func (g *irgen) expr(expr syntax.Expr) ir.Node {
-	// TODO(mdempsky): Change callers to not call on nil?
 	if expr == nil {
 		return nil
 	}
@@ -30,7 +29,6 @@ func (g *irgen) expr(expr syntax.Expr) ir.Node {
 	}
 	switch {
 	case tv.IsBuiltin():
-		// TODO(mdempsky): Handle in CallExpr?
 		return g.use(expr.(*syntax.Name))
 	case tv.IsType():
 		return ir.TypeNode(g.typ(tv.Type))
@@ -65,7 +63,7 @@ func (g *irgen) expr(expr syntax.Expr) ir.Node {
 	}
 
 	n := g.expr0(typ, expr)
-	if n.Typecheck() != 1 {
+	if n.Typecheck() != 1 && n.Typecheck() != 3 {
 		base.FatalfAt(g.pos(expr), "missed typecheck: %+v", n)
 	}
 	if !g.match(n.Type(), typ, tv.HasOk()) {
@@ -82,8 +80,7 @@ func (g *irgen) expr0(typ types2.Type, expr syntax.Expr) ir.Node {
 		if _, isNil := g.info.Uses[expr].(*types2.Nil); isNil {
 			return Nil(pos, g.typ(typ))
 		}
-		// TODO(mdempsky): Remove dependency on typecheck.Expr.
-		return typecheck.Expr(g.use(expr))
+		return g.use(expr)
 
 	case *syntax.CompositeLit:
 		return g.compLit(typ, expr)
@@ -135,7 +132,7 @@ func (g *irgen) expr0(typ types2.Type, expr syntax.Expr) ir.Node {
 			index := g.expr(expr.Index)
 			if index.Op() != ir.OTYPE {
 				// This is just a normal index expression
-				return Index(pos, g.expr(expr.X), index)
+				return Index(pos, g.typ(typ), g.expr(expr.X), index)
 			}
 			// This is generic function instantiation with a single type
 			targs = []ir.Node{index}
@@ -157,24 +154,23 @@ func (g *irgen) expr0(typ types2.Type, expr syntax.Expr) ir.Node {
 		// Qualified identifier.
 		if name, ok := expr.X.(*syntax.Name); ok {
 			if _, ok := g.info.Uses[name].(*types2.PkgName); ok {
-				// TODO(mdempsky): Remove dependency on typecheck.Expr.
-				return typecheck.Expr(g.use(expr.Sel))
+				return g.use(expr.Sel)
 			}
 		}
 		return g.selectorExpr(pos, typ, expr)
 
 	case *syntax.SliceExpr:
-		return Slice(pos, g.expr(expr.X), g.expr(expr.Index[0]), g.expr(expr.Index[1]), g.expr(expr.Index[2]))
+		return Slice(pos, g.typ(typ), g.expr(expr.X), g.expr(expr.Index[0]), g.expr(expr.Index[1]), g.expr(expr.Index[2]))
 
 	case *syntax.Operation:
 		if expr.Y == nil {
-			return Unary(pos, g.op(expr.Op, unOps[:]), g.expr(expr.X))
+			return Unary(pos, g.typ(typ), g.op(expr.Op, unOps[:]), g.expr(expr.X))
 		}
 		switch op := g.op(expr.Op, binOps[:]); op {
 		case ir.OEQ, ir.ONE, ir.OLT, ir.OLE, ir.OGT, ir.OGE:
 			return Compare(pos, g.typ(typ), op, g.expr(expr.X), g.expr(expr.Y))
 		default:
-			return Binary(pos, op, g.expr(expr.X), g.expr(expr.Y))
+			return Binary(pos, op, g.typ(typ), g.expr(expr.X), g.expr(expr.Y))
 		}
 
 	default:
@@ -240,7 +236,7 @@ func (g *irgen) selectorExpr(pos src.XPos, typ types2.Type, expr *syntax.Selecto
 
 			if havePtr != wantPtr {
 				if havePtr {
-					x = Implicit(Deref(pos, x))
+					x = Implicit(Deref(pos, x.Type().Elem(), x))
 				} else {
 					x = Implicit(Addr(pos, x))
 				}

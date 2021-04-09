@@ -157,12 +157,13 @@ const (
 type CallExpr struct {
 	miniExpr
 	origNode
-	X         Node
-	Args      Nodes
-	KeepAlive []*Name // vars to be kept alive until call returns
-	IsDDD     bool
-	Use       CallUse
-	NoInline  bool
+	X               Node
+	Args            Nodes
+	KeepAlive       []*Name // vars to be kept alive until call returns
+	IsDDD           bool
+	Use             CallUse
+	NoInline        bool
+	PreserveClosure bool // disable directClosureCall for this call
 }
 
 func NewCallExpr(pos src.XPos, op Op, fun Node, args []Node) *CallExpr {
@@ -527,6 +528,13 @@ func (n *SelectorExpr) FuncName() *Name {
 	fn := NewNameAt(n.Selection.Pos, MethodSym(n.X.Type(), n.Sel))
 	fn.Class = PFUNC
 	fn.SetType(n.Type())
+	if n.Selection.Nname != nil {
+		// TODO(austin): Nname is nil for interface method
+		// expressions (I.M), so we can't attach a Func to
+		// those here. reflectdata.methodWrapper generates the
+		// Func.
+		fn.Func = n.Selection.Nname.(*Name).Func
+	}
 	return fn
 }
 

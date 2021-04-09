@@ -501,6 +501,8 @@ var optab = []Optab{
 	{AVMOV, C_REG, C_NONE, C_NONE, C_ELEM, 78, 4, 0, 0, 0},
 	{AVMOV, C_ARNG, C_NONE, C_NONE, C_ARNG, 83, 4, 0, 0, 0},
 	{AVDUP, C_ELEM, C_NONE, C_NONE, C_ARNG, 79, 4, 0, 0, 0},
+	{AVDUP, C_ELEM, C_NONE, C_NONE, C_VREG, 80, 4, 0, 0, 0},
+	{AVDUP, C_REG, C_NONE, C_NONE, C_ARNG, 82, 4, 0, 0, 0},
 	{AVMOVI, C_ADDCON, C_NONE, C_NONE, C_ARNG, 86, 4, 0, 0, 0},
 	{AVFMLA, C_ARNG, C_ARNG, C_NONE, C_ARNG, 72, 4, 0, 0, 0},
 	{AVEXT, C_VCON, C_ARNG, C_ARNG, C_ARNG, 94, 4, 0, 0, 0},
@@ -1198,19 +1200,16 @@ func (c *ctxt7) flushpool(p *obj.Prog, skip int) {
 // addpool128 adds a 128-bit constant to literal pool by two consecutive DWORD
 // instructions, the 128-bit constant is formed by ah.Offset<<64+al.Offset.
 func (c *ctxt7) addpool128(p *obj.Prog, al, ah *obj.Addr) {
-	lit := al.Offset
 	q := c.newprog()
 	q.As = ADWORD
 	q.To.Type = obj.TYPE_CONST
-	q.To.Offset = lit
-	q.Pc = int64(c.pool.size)
+	q.To.Offset = al.Offset
 
-	lit = ah.Offset
 	t := c.newprog()
 	t.As = ADWORD
 	t.To.Type = obj.TYPE_CONST
-	t.To.Offset = lit
-	t.Pc = int64(c.pool.size + 8)
+	t.To.Offset = ah.Offset
+
 	q.Link = t
 
 	if c.blitrl == nil {
@@ -1221,6 +1220,7 @@ func (c *ctxt7) addpool128(p *obj.Prog, al, ah *obj.Addr) {
 	}
 
 	c.elitrl = t
+	c.pool.size = roundUp(c.pool.size, 16)
 	c.pool.size += 16
 	p.Pool = q
 }
@@ -1265,7 +1265,6 @@ func (c *ctxt7) addpool(p *obj.Prog, a *obj.Addr) {
 
 	q := c.newprog()
 	*q = *t
-	q.Pc = int64(c.pool.size)
 	if c.blitrl == nil {
 		c.blitrl = q
 		c.pool.start = uint32(p.Pc)
@@ -1273,9 +1272,22 @@ func (c *ctxt7) addpool(p *obj.Prog, a *obj.Addr) {
 		c.elitrl.Link = q
 	}
 	c.elitrl = q
-	c.pool.size = -c.pool.size & (funcAlign - 1)
+	if q.As == ADWORD {
+		// make DWORD 8-byte aligned, this is not required by ISA,
+		// just to avoid performance penalties when loading from
+		// the constant pool across a cache line.
+		c.pool.size = roundUp(c.pool.size, 8)
+	}
 	c.pool.size += uint32(sz)
 	p.Pool = q
+}
+
+// roundUp rounds up x to "to".
+func roundUp(x, to uint32) uint32 {
+	if to == 0 || to&(to-1) != 0 {
+		log.Fatalf("rounded up to a value that is not a power of 2: %d\n", to)
+	}
+	return (x + to - 1) &^ (to - 1)
 }
 
 func (c *ctxt7) regoff(a *obj.Addr) uint32 {
@@ -4653,13 +4665,13 @@ func (c *ctxt7) asmout(p *obj.Prog, o *Optab, out []uint32) {
 		o1 |= (uint32(Q&1) << 30) | (uint32(imm5&0x1f) << 16)
 		o1 |= (uint32(rf&31) << 5) | uint32(rt&31)
 
-	case 80: /* vmov V.<T>[index], Vn */
+	case 80: /* vmov/vdup V.<T>[index], Vn */
 		rf := int(p.From.Reg)
 		rt := int(p.To.Reg)
 		imm5 := 0
 		index := int(p.From.Index)
 		switch p.As {
-		case AVMOV:
+		case AVMOV, AVDUP:
 			o1 = 1<<30 | 15<<25 | 1<<10
 			switch (p.From.Reg >> 5) & 15 {
 			case ARNG_B:
@@ -4709,7 +4721,7 @@ func (c *ctxt7) asmout(p *obj.Prog, o *Optab, out []uint32) {
 		o1 = c.maskOpvldvst(p, o1)
 		o1 |= uint32(r&31) << 5
 
-	case 82: /* vmov Rn, Vd.<T> */
+	case 82: /* vmov/vdup Rn, Vd.<T> */
 		rf := int(p.From.Reg)
 		rt := int(p.To.Reg)
 		o1 = 7<<25 | 3<<10
@@ -4737,7 +4749,7 @@ func (c *ctxt7) asmout(p *obj.Prog, o *Optab, out []uint32) {
 			Q = 1
 			imm5 = 2
 		default:
-			c.ctxt.Diag("invalid arrangement on VMOV Rn, Vd.<T>: %v\n", p)
+			c.ctxt.Diag("invalid arrangement: %v\n", p)
 		}
 		o1 |= (Q & 1 << 30) | (imm5 & 0x1f << 16)
 		o1 |= (uint32(rf&31) << 5) | uint32(rt&31)

@@ -1883,6 +1883,10 @@ func needm() {
 	// Store the original signal mask for use by minit.
 	mp.sigmask = sigmask
 
+	// Install TLS on some platforms (previously setg
+	// would do this if necessary).
+	osSetupTLS(mp)
+
 	// Install g (= m->g0) and set the stack bounds
 	// to match the current stack. We don't actually know
 	// how big the stack is, like we don't know how big any
@@ -5312,7 +5316,7 @@ func preemptall() bool {
 
 // Tell the goroutine running on processor P to stop.
 // This function is purely best-effort. It can incorrectly fail to inform the
-// goroutine. It can send inform the wrong goroutine. Even if it informs the
+// goroutine. It can inform the wrong goroutine. Even if it informs the
 // correct goroutine, that goroutine might ignore the request if it is
 // simultaneously executing newstack.
 // No lock needs to be held.
@@ -5332,7 +5336,7 @@ func preemptone(_p_ *p) bool {
 
 	gp.preempt = true
 
-	// Every call in a go routine checks for stack overflow by
+	// Every call in a goroutine checks for stack overflow by
 	// comparing the current stack pointer to gp->stackguard0.
 	// Setting gp->stackguard0 to StackPreempt folds
 	// preemption into the normal stack overflow check.
@@ -6027,6 +6031,9 @@ func setMaxThreads(in int) (out int) {
 }
 
 func haveexperiment(name string) bool {
+	// GOEXPERIMENT is a comma-separated list of enabled
+	// experiments. It's not the raw environment variable, but a
+	// pre-processed list from cmd/internal/objabi.
 	x := sys.GOEXPERIMENT
 	for x != "" {
 		xname := ""
@@ -6038,9 +6045,6 @@ func haveexperiment(name string) bool {
 		}
 		if xname == name {
 			return true
-		}
-		if len(xname) > 2 && xname[:2] == "no" && xname[2:] == name {
-			return false
 		}
 	}
 	return false
@@ -6182,7 +6186,7 @@ var inittrace tracestat
 
 type tracestat struct {
 	active bool   // init tracing activation status
-	id     int64  // init go routine id
+	id     int64  // init goroutine id
 	allocs uint64 // heap allocations
 	bytes  uint64 // heap allocated bytes
 }
@@ -6214,7 +6218,7 @@ func doInit(t *initTask) {
 
 		if inittrace.active {
 			start = nanotime()
-			// Load stats non-atomically since tracinit is updated only by this init go routine.
+			// Load stats non-atomically since tracinit is updated only by this init goroutine.
 			before = inittrace
 		}
 
@@ -6227,7 +6231,7 @@ func doInit(t *initTask) {
 
 		if inittrace.active {
 			end := nanotime()
-			// Load stats non-atomically since tracinit is updated only by this init go routine.
+			// Load stats non-atomically since tracinit is updated only by this init goroutine.
 			after := inittrace
 
 			pkg := funcpkgpath(findfunc(funcPC(firstFunc)))

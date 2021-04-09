@@ -306,6 +306,10 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 				log.Fatalf("cannot handle R_TLS_IE (sym %s) when linking internally", ldr.SymName(s))
 			}
 		case objabi.R_ADDR:
+			if weak && !ldr.AttrReachable(rs) {
+				// Redirect it to runtime.unreachableMethod, which will throw if called.
+				rs = syms.unreachableMethod
+			}
 			if target.IsExternal() {
 				nExtReloc++
 
@@ -507,7 +511,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 
 		if target.IsPPC64() || target.IsS390X() {
 			if rv != sym.RV_NONE {
-				o = thearch.Archrelocvariant(target, ldr, r, rv, s, o)
+				o = thearch.Archrelocvariant(target, ldr, r, rv, s, o, P)
 			}
 		}
 
@@ -586,6 +590,9 @@ func extreloc(ctxt *Link, ldr *loader.Loader, s loader.Sym, r loader.Reloc) (loa
 	case objabi.R_ADDR:
 		// set up addend for eventual relocation via outer symbol.
 		rs := ldr.ResolveABIAlias(r.Sym())
+		if r.Weak() && !ldr.AttrReachable(rs) {
+			rs = ctxt.ArchSyms.unreachableMethod
+		}
 		rs, off := FoldSubSymbolOffset(ldr, rs)
 		rr.Xadd = r.Add() + off
 		rr.Xsym = rs

@@ -297,19 +297,20 @@ func TestTypecheckConst(t *testing.T) {
 	code := `
 package p
 
-// type user struct {
-// 	name string
-// }
-
-// func (this user) name() {
-
-// }
-
 type A struct {
-    self A
+}
+
+func (this *A) name() {
+}
+
+type B *A
+
+func main() {
+   var b B
+
+b.name()
 }
 `
-
 	f, err := parseSrc("testTypecheckConst", code)
 
 	if err != nil {

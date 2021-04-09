@@ -60,6 +60,7 @@ func runTidy(ctx context.Context, cmd *base.Command, args []string) {
 	// request that their test dependencies be included.
 	modload.ForceUseModules = true
 	modload.RootMode = modload.NeedRoot
+	modload.DisallowWriteGoMod() // Suppress writing until we've tidied the file.
 
 	modload.LoadPackages(ctx, modload.PackageOpts{
 		Tags:                     imports.AnyTags(),
@@ -70,7 +71,15 @@ func runTidy(ctx context.Context, cmd *base.Command, args []string) {
 		SilenceMissingStdImports: true,
 	}, "all")
 
-	modload.TidyBuildList()
-	modload.TrimGoSum()
-	modload.WriteGoMod()
+	modload.TidyBuildList(ctx)
+	modload.TrimGoSum(ctx)
+
+	modload.AllowWriteGoMod()
+
+	// TODO(#40775): Toggling global state via AllowWriteGoMod makes the
+	// invariants for go.mod cleanliness harder to reason about. Instead, either
+	// make DisallowWriteGoMod an explicit PackageOpts field, or add a Tidy
+	// argument to modload.LoadPackages so that Tidy is just one call into the
+	// module loader, or perhaps both.
+	modload.WriteGoMod(ctx)
 }

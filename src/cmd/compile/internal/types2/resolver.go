@@ -509,6 +509,7 @@ L: // unpack receiver type
 		//      ptr = true
 		// 	rtyp = t.X
 		case *syntax.Operation:
+			// shizhz - 如果 receiver 是指针，则取其基础类型
 			if t.Op != syntax.Mul || t.Y != nil {
 				break
 			}

@@ -69,6 +69,14 @@ func (a *ABIParamResultInfo) SpillAreaSize() int64 {
 	return a.spillAreaSize
 }
 
+// ArgWidth returns the amount of stack needed for all the inputs
+// and outputs of a function or method, including ABI-defined parameter
+// slots and ABI-defined spill slots for register-resident parameters.
+// The name is inherited from (*Type).ArgWidth(), which it replaces.
+func (a *ABIParamResultInfo) ArgWidth() int64 {
+	return a.spillAreaSize + a.offsetToSpillArea - a.config.LocalsOffset()
+}
+
 // RegIndex stores the index into the set of machine registers used by
 // the ABI on a specific architecture for parameter passing.  RegIndex
 // values 0 through N-1 (where N is the number of integer registers
@@ -160,7 +168,7 @@ func appendParamTypes(rts []*types.Type, t *types.Type) []*types.Type {
 		typ := t.Kind()
 		switch typ {
 		case types.TARRAY:
-			for i := int64(0); i < t.Size(); i++ { // 0 gets no registers, plus future-proofing.
+			for i := int64(0); i < t.NumElem(); i++ { // 0 gets no registers, plus future-proofing.
 				rts = appendParamTypes(rts, t.Elem())
 			}
 		case types.TSTRUCT:
@@ -217,27 +225,22 @@ func appendParamOffsets(offsets []int64, at int64, t *types.Type) ([]int64, int6
 	return offsets, at
 }
 
-// SpillOffset returns the offset *within the spill area* for the parameter that "a" describes.
-// Registers will be spilled here; if a memory home is needed (for a pointer method e.g.)
-// then that will be the address.
-// This will panic if "a" describes a stack-allocated parameter.
-func (a *ABIParamAssignment) SpillOffset() int32 {
-	if len(a.Registers) == 0 {
-		panic("Stack-allocated parameters have no spill offset")
-	}
-	return a.offset
-}
-
-// FrameOffset returns the location that a value would spill to, if any exists.
-// For register-allocated inputs, that is their spill offset reserved for morestack
-// (might as well use it, it is there); for stack-allocated inputs and outputs,
-// that is their location on the stack.  For register-allocated outputs, there is
-// no defined spill area, so return -1.
+// FrameOffset returns the frame-pointer-relative location that a function
+// would spill its input or output parameter to, if such a spill slot exists.
+// If there is none defined (e.g., register-allocated outputs) it panics.
+// For register-allocated inputs that is their spill offset reserved for morestack;
+// for stack-allocated inputs and outputs, that is their location on the stack.
+// (In a future version of the ABI, register-resident inputs may lose their defined
+// spill area to help reduce stack sizes.)
 func (a *ABIParamAssignment) FrameOffset(i *ABIParamResultInfo) int64 {
-	if len(a.Registers) == 0 || a.offset == -1 {
-		return int64(a.offset)
+	if a.offset == -1 {
+		panic("Function parameter has no ABI-defined frame-pointer offset")
 	}
-	return int64(a.offset) + i.SpillAreaOffset()
+	if len(a.Registers) == 0 { // passed on stack
+		return int64(a.offset) - i.config.LocalsOffset()
+	}
+	// spill area for registers
+	return int64(a.offset) + i.SpillAreaOffset() - i.config.LocalsOffset()
 }
 
 // RegAmounts holds a specified number of integer/float registers.
@@ -414,20 +417,25 @@ func (config *ABIConfig) ABIAnalyzeFuncType(ft *types.Func) *ABIParamResultInfo 
 
 // ABIAnalyze returns the same result as ABIAnalyzeFuncType, but also
 // updates the offsets of all the receiver, input, and output fields.
-func (config *ABIConfig) ABIAnalyze(t *types.Type) *ABIParamResultInfo {
+// If setNname is true, it also sets the FrameOffset of the Nname for
+// the field(s); this is for use when compiling a function and figuring out
+// spill locations.  Doing this for callers can cause races for register
+// outputs because their frame location transitions from BOGUS_FUNARG_OFFSET
+// to zero to an as-if-AUTO offset that has no use for callers.
+func (config *ABIConfig) ABIAnalyze(t *types.Type, setNname bool) *ABIParamResultInfo {
 	ft := t.FuncType()
 	result := config.ABIAnalyzeFuncType(ft)
 	// Fill in the frame offsets for receiver, inputs, results
 	k := 0
 	if t.NumRecvs() != 0 {
-		config.updateOffset(result, ft.Receiver.FieldSlice()[0], result.inparams[0], false)
+		config.updateOffset(result, ft.Receiver.FieldSlice()[0], result.inparams[0], false, setNname)
 		k++
 	}
 	for i, f := range ft.Params.FieldSlice() {
-		config.updateOffset(result, f, result.inparams[k+i], false)
+		config.updateOffset(result, f, result.inparams[k+i], false, setNname)
 	}
 	for i, f := range ft.Results.FieldSlice() {
-		config.updateOffset(result, f, result.outparams[i], true)
+		config.updateOffset(result, f, result.outparams[i], true, setNname)
 	}
 	return result
 }
@@ -442,23 +450,31 @@ func FieldOffsetOf(f *types.Field) int64 {
 	return f.Offset
 }
 
-func (config *ABIConfig) updateOffset(result *ABIParamResultInfo, f *types.Field, a ABIParamAssignment, isReturn bool) {
+func (config *ABIConfig) updateOffset(result *ABIParamResultInfo, f *types.Field, a ABIParamAssignment, isReturn, setNname bool) {
 	// Everything except return values in registers has either a frame home (if not in a register) or a frame spill location.
 	if !isReturn || len(a.Registers) == 0 {
 		// The type frame offset DOES NOT show effects of minimum frame size.
 		// Getting this wrong breaks stackmaps, see liveness/plive.go:WriteFuncMap and typebits/typebits.go:Set
 		parameterUpdateMu.Lock()
 		defer parameterUpdateMu.Unlock()
-		off := a.FrameOffset(result) - config.LocalsOffset()
+		off := a.FrameOffset(result)
 		fOffset := f.Offset
 		if fOffset == types.BOGUS_FUNARG_OFFSET {
 			// Set the Offset the first time. After that, we may recompute it, but it should never change.
 			f.Offset = off
 			if f.Nname != nil {
+				// always set it in this case.
 				f.Nname.(*ir.Name).SetFrameOffset(off)
+				f.Nname.(*ir.Name).SetIsOutputParamInRegisters(false)
 			}
 		} else if fOffset != off {
 			panic(fmt.Errorf("Offset changed from %d to %d", fOffset, off))
+		}
+	} else {
+		if setNname && f.Nname != nil {
+			fname := f.Nname.(*ir.Name)
+			fname.SetIsOutputParamInRegisters(true)
+			fname.SetFrameOffset(0)
 		}
 	}
 }
