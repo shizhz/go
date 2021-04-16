@@ -1023,6 +1023,9 @@ func callMethod(ctxt *methodValue, frame unsafe.Pointer, retValid *bool, regs *a
 	methodFrameSize = align(methodFrameSize, ptrSize)
 	methodFrameSize += methodABI.spill
 
+	// Mark pointers in registers for the return path.
+	methodRegs.ReturnIsPtr = methodABI.outRegPtrs
+
 	// Call.
 	// Call copies the arguments from scratch to the stack, calls fn,
 	// and then copies the results back into scratch.
@@ -1059,6 +1062,11 @@ func callMethod(ctxt *methodValue, frame unsafe.Pointer, retValid *bool, regs *a
 
 	// See the comment in callReflect.
 	runtime.KeepAlive(ctxt)
+
+	// Keep valueRegs alive because it may hold live pointer results.
+	// The caller (methodValueCall) has it as a stack object, which is only
+	// scanned when there is a reference to it.
+	runtime.KeepAlive(valueRegs)
 }
 
 // funcName returns the name of f, for use in error messages.
@@ -2702,9 +2710,14 @@ func New(typ Type) Value {
 		panic("reflect: New(nil)")
 	}
 	t := typ.(*rtype)
+	pt := t.ptrTo()
+	if ifaceIndir(pt) {
+		// This is a pointer to a go:notinheap type.
+		panic("reflect: New of type that may not be allocated in heap (possibly undefined cgo C type)")
+	}
 	ptr := unsafe_New(t)
 	fl := flag(Ptr)
-	return Value{t.ptrTo(), ptr, fl}
+	return Value{pt, ptr, fl}
 }
 
 // NewAt returns a Value representing a pointer to a value of the

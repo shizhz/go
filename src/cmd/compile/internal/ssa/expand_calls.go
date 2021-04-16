@@ -1449,6 +1449,19 @@ func expandCalls(f *Func) {
 	}
 
 	// Step 6: elide any copies introduced.
+	// Update named values.
+	for _, name := range f.Names {
+		values := f.NamedValues[name]
+		for i, v := range values {
+			if v.Op == OpCopy {
+				a := v.Args[0]
+				for a.Op == OpCopy {
+					a = a.Args[0]
+				}
+				values[i] = a
+			}
+		}
+	}
 	for _, b := range f.Blocks {
 		for _, v := range b.Values {
 			for i, a := range v.Args {
@@ -1461,6 +1474,31 @@ func expandCalls(f *Func) {
 					b := a.Args[0]
 					a.invalidateRecursively()
 					a = b
+				}
+			}
+		}
+	}
+
+	// Rewriting can attach lines to values that are unlikely to survive code generation, so move them to a use.
+	for _, b := range f.Blocks {
+		for _, v := range b.Values {
+			for _, a := range v.Args {
+				if a.Pos.IsStmt() != src.PosIsStmt {
+					continue
+				}
+				if a.Type.IsMemory() {
+					continue
+				}
+				if a.Pos.Line() != v.Pos.Line() {
+					continue
+				}
+				if !a.Pos.SameFile(v.Pos) {
+					continue
+				}
+				switch a.Op {
+				case OpArgIntReg, OpArgFloatReg, OpSelectN:
+					v.Pos = v.Pos.WithIsStmt()
+					a.Pos = a.Pos.WithDefaultStmt()
 				}
 			}
 		}

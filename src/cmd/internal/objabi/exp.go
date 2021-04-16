@@ -20,6 +20,11 @@ import (
 // was built with.)
 var Experiment goexperiment.Flags = parseExperiments()
 
+// experimentBaseline specifies the experiment flags that are enabled by
+// default in the current toolchain. This is, in effect, the "control"
+// configuration and any variation from this is an experiment.
+var experimentBaseline goexperiment.Flags
+
 // FramePointerEnabled enables the use of platform conventions for
 // saving frame pointers.
 //
@@ -31,7 +36,7 @@ var FramePointerEnabled = GOARCH == "amd64" || GOARCH == "arm64"
 
 func parseExperiments() goexperiment.Flags {
 	// Start with the statically enabled set of experiments.
-	flags := goexperiment.BaselineFlags
+	flags := experimentBaseline
 
 	// Pick up any changes to the baseline configuration from the
 	// GOEXPERIMENT environment. This can be set at make.bash time
@@ -54,9 +59,10 @@ func parseExperiments() goexperiment.Flags {
 				continue
 			}
 			if f == "none" {
-				// GOEXPERIMENT=none restores the baseline configuration.
-				// (This is useful for overriding make.bash-time settings.)
-				flags = goexperiment.BaselineFlags
+				// GOEXPERIMENT=none disables all experiment flags.
+				// This is used by cmd/dist, which doesn't know how
+				// to build with any experiment flags.
+				flags = goexperiment.Flags{}
 				continue
 			}
 			val := true
@@ -102,8 +108,9 @@ func parseExperiments() goexperiment.Flags {
 
 // expList returns the list of lower-cased experiment names for
 // experiments that differ from base. base may be nil to indicate no
-// experiments.
-func expList(exp, base *goexperiment.Flags) []string {
+// experiments. If all is true, then include all experiment flags,
+// regardless of base.
+func expList(exp, base *goexperiment.Flags, all bool) []string {
 	var list []string
 	rv := reflect.ValueOf(exp).Elem()
 	var rBase reflect.Value
@@ -118,7 +125,7 @@ func expList(exp, base *goexperiment.Flags) []string {
 		if base != nil {
 			baseVal = rBase.Field(i).Bool()
 		}
-		if val != baseVal {
+		if all || val != baseVal {
 			if val {
 				list = append(list, name)
 			} else {
@@ -134,11 +141,11 @@ func expList(exp, base *goexperiment.Flags) []string {
 // GOEXPERIMENT is exactly what a user would set on the command line
 // to get the set of enabled experiments.
 func GOEXPERIMENT() string {
-	return strings.Join(expList(&Experiment, &goexperiment.BaselineFlags), ",")
+	return strings.Join(expList(&Experiment, &experimentBaseline, false), ",")
 }
 
 // EnabledExperiments returns a list of enabled experiments, as
 // lower-cased experiment names.
 func EnabledExperiments() []string {
-	return expList(&Experiment, nil)
+	return expList(&Experiment, nil, false)
 }

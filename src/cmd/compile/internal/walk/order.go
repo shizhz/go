@@ -6,6 +6,7 @@ package walk
 
 import (
 	"fmt"
+	"go/constant"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/escape"
@@ -269,10 +270,50 @@ func (o *orderState) addrTemp(n ir.Node) ir.Node {
 func (o *orderState) mapKeyTemp(t *types.Type, n ir.Node) ir.Node {
 	// Most map calls need to take the address of the key.
 	// Exception: map*_fast* calls. See golang.org/issue/19015.
-	if mapfast(t) == mapslow {
+	alg := mapfast(t)
+	if alg == mapslow {
 		return o.addrTemp(n)
 	}
-	return n
+	var kt *types.Type
+	switch alg {
+	case mapfast32, mapfast32ptr:
+		kt = types.Types[types.TUINT32]
+	case mapfast64, mapfast64ptr:
+		kt = types.Types[types.TUINT64]
+	case mapfaststr:
+		kt = types.Types[types.TSTRING]
+	}
+	nt := n.Type()
+	switch {
+	case nt == kt:
+		return n
+	case nt.Kind() == kt.Kind():
+		// can directly convert (e.g. named type to underlying type)
+		return typecheck.Expr(ir.NewConvExpr(n.Pos(), ir.OCONVNOP, kt, n))
+	case nt.IsInteger() && kt.IsInteger():
+		// can directly convert (e.g. int32 to uint32)
+		if n.Op() == ir.OLITERAL && nt.IsSigned() {
+			// avoid constant overflow error
+			n = ir.NewConstExpr(constant.MakeUint64(uint64(ir.Int64Val(n))), n)
+			n.SetType(kt)
+			return n
+		}
+		return typecheck.Expr(ir.NewConvExpr(n.Pos(), ir.OCONV, kt, n))
+	default:
+		// Unsafe cast through memory.
+		// We'll need to do a load with type kt. Create a temporary of type kt to
+		// ensure sufficient alignment. nt may be under-aligned.
+		if kt.Align < nt.Align {
+			base.Fatalf("mapKeyTemp: key type is not sufficiently aligned, kt=%v nt=%v", kt, nt)
+		}
+		tmp := o.newTemp(kt, true)
+		// *(*nt)(&tmp) = n
+		var e ir.Node = typecheck.NodAddr(tmp)
+		e = ir.NewConvExpr(n.Pos(), ir.OCONVNOP, nt.PtrTo(), e)
+		e = ir.NewStarExpr(n.Pos(), e)
+		o.append(ir.NewAssignStmt(base.Pos, e, n))
+		return tmp
+	}
 }
 
 // mapKeyReplaceStrConv replaces OBYTES2STR by OBYTES2STRTMP
@@ -1147,7 +1188,7 @@ func (o *orderState) expr1(n, lhs ir.Node) ir.Node {
 		if n.X.Type().IsInterface() {
 			return n
 		}
-		if _, needsaddr := convFuncName(n.X.Type(), n.Type()); needsaddr || isStaticCompositeLiteral(n.X) {
+		if _, _, needsaddr := convFuncName(n.X.Type(), n.Type()); needsaddr || isStaticCompositeLiteral(n.X) {
 			// Need a temp if we need to pass the address to the conversion function.
 			// We also process static composite literal node here, making a named static global
 			// whose address we can put directly in an interface (see OCONVIFACE case in walk).

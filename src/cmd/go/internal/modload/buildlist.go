@@ -105,6 +105,7 @@ func newRequirements(depth modDepth, rootModules []module.Version, direct map[st
 	}
 
 	rs := &Requirements{
+		depth:          depth,
 		rootModules:    rootModules,
 		maxRootVersion: make(map[string]string, len(rootModules)),
 		direct:         direct,
@@ -188,6 +189,12 @@ func (rs *Requirements) Graph(ctx context.Context) (*ModuleGraph, error) {
 	})
 	cached := rs.graph.Load().(cachedGraph)
 	return cached.mg, cached.err
+}
+
+// IsDirect returns whether the given module provides a package directly
+// imported by a package or test in the main module.
+func (rs *Requirements) IsDirect(path string) bool {
+	return rs.direct[path]
 }
 
 // A ModuleGraph represents the complete graph of module dependencies
@@ -485,7 +492,7 @@ func editRequirements(ctx context.Context, rs *Requirements, add, mustSelect []m
 		// remove roots.)
 	}
 
-	min, err := mvs.Req(Target, rootPaths, &mvsReqs{buildList: final})
+	min, err := mvs.Req(Target, rootPaths, &mvsReqs{roots: final[1:]})
 	if err != nil {
 		return nil, false, err
 	}
@@ -603,7 +610,7 @@ func updateRoots(ctx context.Context, depth modDepth, direct map[string]bool, pk
 			// dependencies, then we can't reliably compute a minimal subset of them.
 			return rs, err
 		}
-		keep = mg.BuildList()
+		keep = mg.BuildList()[1:]
 
 		for _, root := range rs.rootModules {
 			// If the selected version of the root is the same as what was already
@@ -618,7 +625,6 @@ func updateRoots(ctx context.Context, depth modDepth, direct map[string]bool, pk
 			}
 		}
 	} else {
-		keep = append(keep, Target)
 		kept := map[module.Version]bool{Target: true}
 		for _, pkg := range pkgs {
 			if pkg.mod.Path != "" && !kept[pkg.mod] {
@@ -684,7 +690,7 @@ func updateRoots(ctx context.Context, depth modDepth, direct map[string]bool, pk
 		return rs, nil
 	}
 
-	min, err := mvs.Req(Target, rootPaths, &mvsReqs{buildList: keep})
+	min, err := mvs.Req(Target, rootPaths, &mvsReqs{roots: keep})
 	if err != nil {
 		return rs, err
 	}
