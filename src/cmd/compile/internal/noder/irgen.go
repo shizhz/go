@@ -125,6 +125,7 @@ Outer:
 		for j, decl := range p.file.DeclList {
 			switch decl := decl.(type) {
 			case *syntax.ImportDecl:
+				// shizhz - 处理 import 语句，将对应的包加载并解析成 types.Pkg 对象，本质上是根据 import 语句实例化 typecheck.Target.Imports 字段
 				g.importDecl(p, decl)
 			default:
 				declLists[i] = p.file.DeclList[j:]
@@ -149,6 +150,10 @@ Outer:
 		for _, decl := range declList {
 			switch decl := decl.(type) {
 			case *syntax.TypeDecl:
+				// shizhz - 对于每个全局类型申明，创建一个对等的 ir.Decl 对象并将其存入 typecheck.Target.Decls 中
+				// 1. 创建 Name 对象
+				// 2. 将 types2.Type 转换为对应的 types.Type
+				// 3. 处理方法，创建对应的 Field 对象
 				g.typeDecl((*ir.Nodes)(&g.target.Decls), decl)
 			}
 		}
@@ -157,6 +162,7 @@ Outer:
 
 	// 3. Process all remaining declarations.
 	for _, declList := range declLists {
+		// shizhz - 处理其他类型的申明，创建出对应的 ir.Node 并保存在 typecheck.Target.Decls 中
 		g.target.Decls = append(g.target.Decls, g.decls(declList)...)
 	}
 
@@ -167,6 +173,7 @@ Outer:
 		}
 	}
 
+	// shizhz - 将 Builtin 函数注册到 types.LocalPkg 中
 	typecheck.DeclareUniverse()
 
 	for _, p := range noders {
@@ -176,12 +183,14 @@ Outer:
 		// Double check for any type-checking inconsistencies. This can be
 		// removed once we're confident in IR generation results.
 		syntax.Walk(p.file, func(n syntax.Node) bool {
+			// shizhz - 检查 builtin 函数调用的合法性
 			g.validate(n)
 			return false
 		})
 	}
 
 	// Create any needed stencils of generic functions
+	// shizhz - 为每个泛型函数调用生成函数类型实例与函数实例。
 	g.stencil()
 
 	// For now, remove all generic functions from g.target.Decl, since they

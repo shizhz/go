@@ -193,12 +193,15 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 	dwarfgen.RecordPackageName()
 
 	// Build init task.
+	// shizhz - 将 package 的初始化语句按照依赖关系进行排序（包括全局变量，init 函数，以及所依赖的包的 .inittask 函数），最终创建出一个名为 .inittask 的函数并 export 出去。
+	// 由此可知，每个包都会有一个 .inittask 的初始化函数
 	if initTask := pkginit.Task(); initTask != nil {
 		typecheck.Export(initTask)
 	}
 
 	// Eliminate some obviously dead code.
 	// Must happen after typechecking.
+	// shizhz - 遍历函数的 ir.Tree, 删除明显无效的代码。例如 if 语句中的条件为常量并且为 true, 那么 else 分支就是无效代码
 	for _, n := range typecheck.Target.Decls {
 		if n.Op() == ir.ODCLFUNC {
 			deadcode.Func(n.(*ir.Func))
@@ -225,12 +228,14 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 	// Inlining
 	base.Timer.Start("fe", "inlining")
 	if base.Flag.LowerL != 0 {
+		// shizhz - 对每个函数调用形成的调用树（ir.Node Tree）自底向上遍历，然后依次检查每个函数是否可以 inline, 对于可以 inline 的函数进行 inline 操作。
 		inline.InlinePackage()
 	}
 
 	// Devirtualize.
 	for _, n := range typecheck.Target.Decls {
 		if n.Op() == ir.ODCLFUNC {
+			// shizhz - 如果表达式 i.m() 中 i 为接口类型，则尽可能将其替换为实际的类型，以便在 Escape Analysis 时尽可能地将变量留在 Stack 上。
 			devirtualize.Func(n.(*ir.Func))
 		}
 	}

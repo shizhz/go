@@ -41,6 +41,7 @@ func (g *irgen) funcBody(fn *ir.Func, recv *syntax.Field, sig *syntax.FuncType, 
 	types.CalcSize(typ)
 
 	if block != nil {
+		// shizhz - 设置函数体内的申明为局部变量，默认情况下局部变量的存储位置是 Stack
 		typecheck.DeclContext = ir.PAUTO
 
 		fn.Body = g.stmts(block.List)

@@ -28,6 +28,7 @@ package types2_test
 import (
 	"cmd/compile/internal/syntax"
 	"flag"
+	"fmt"
 	"internal/testenv"
 	"os"
 	"path/filepath"
@@ -316,8 +317,6 @@ b.name()
 	syntax.Fdump(os.Stdout, f)
 
 	var conf Config
-	conf.AcceptMethodTypeParams = true
-	conf.InferFromConstraints = true
 	conf.Trace = true
 	conf.Importer = defaultImporter()
 	conf.Error = func(err error) {
